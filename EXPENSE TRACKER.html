@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Expense Tracker</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Personal finance dashboard</p>
+          <h1>Expense Tracker</h1>
+        </div>
+        <div class="topbar-actions">
+          <button class="icon-button" id="exportCsvBtn" type="button" title="Export CSV" aria-label="Export CSV">
+            <span aria-hidden="true">CSV</span>
+          </button>
+          <button class="icon-button" id="printBtn" type="button" title="Print report" aria-label="Print report">
+            <span aria-hidden="true">PRT</span>
+          </button>
+        </div>
+      </header>
+
+      <nav class="tabs" aria-label="Views">
+        <button class="tab-button active" type="button" data-view="overview">Overview</button>
+        <button class="tab-button" type="button" data-view="transactions">Transactions</button>
+        <button class="tab-button" type="button" data-view="reports">Reports</button>
+        <button class="tab-button" type="button" data-view="settings">Settings</button>
+      </nav>
+
+      <main>
+        <section class="view active" id="overviewView">
+          <div class="layout-grid">
+            <section class="summary-grid" aria-label="Financial summary">
+              <article class="metric income">
+                <span>Total income</span>
+                <strong id="totalIncome">INR 0</strong>
+              </article>
+              <article class="metric expense">
+                <span>Total expense</span>
+                <strong id="totalExpense">INR 0</strong>
+              </article>
+              <article class="metric balance">
+                <span>Balance</span>
+                <strong id="balanceAmount">INR 0</strong>
+              </article>
+              <article class="metric budget">
+                <span>Monthly budget used</span>
+                <strong id="budgetUsed">0%</strong>
+              </article>
+            </section>
+
+            <section class="tool-panel transaction-panel">
+              <div class="panel-heading">
+                <h2 id="formTitle">Add transaction</h2>
+                <button class="ghost-button hidden" id="cancelEditBtn" type="button">Cancel edit</button>
+              </div>
+              <form id="transactionForm" autocomplete="off">
+                <input type="hidden" id="editingId">
+
+                <fieldset class="segmented-control">
+                  <legend>Type</legend>
+                  <label>
+                    <input type="radio" name="type" value="income">
+                    <span>Income</span>
+                  </label>
+                  <label>
+                    <input type="radio" name="type" value="expense" checked>
+                    <span>Expense</span>
+                  </label>
+                </fieldset>
+
+                <div class="form-grid">
+                  <label>
+                    <span>Category</span>
+                    <select id="categoryInput" required></select>
+                  </label>
+                  <label>
+                    <span>Amount</span>
+                    <input id="amountInput" type="number" min="1" step="0.01" placeholder="1200" required>
+                  </label>
+                  <label>
+                    <span>Date</span>
+                    <input id="dateInput" type="date" required>
+                  </label>
+                  <label>
+                    <span>Payment mode</span>
+                    <select id="methodInput">
+                      <option>Cash</option>
+                      <option>UPI</option>
+                      <option>Debit card</option>
+                      <option>Credit card</option>
+                      <option>Bank transfer</option>
+                    </select>
+                  </label>
+                </div>
+
+                <label>
+                  <span>Note</span>
+                  <input id="noteInput" type="text" maxlength="80" placeholder="Groceries, salary, rent...">
+                </label>
+
+                <button class="primary-button" type="submit" id="saveTransactionBtn">Save transaction</button>
+              </form>
+            </section>
+
+            <section class="tool-panel chart-panel">
+              <div class="panel-heading">
+                <h2>Spending by category</h2>
+                <span id="categoryChartTotal" class="panel-value">INR 0</span>
+              </div>
+              <div class="chart-box">
+                <canvas id="categoryChart" width="520" height="320" aria-label="Expense category chart"></canvas>
+              </div>
+              <div class="legend-list" id="categoryLegend"></div>
+            </section>
+
+            <section class="tool-panel chart-panel wide">
+              <div class="panel-heading">
+                <h2>Monthly income vs expense</h2>
+                <span class="panel-value" id="savingsRate">0% saved</span>
+              </div>
+              <div class="chart-box bar">
+                <canvas id="monthlyChart" width="920" height="300" aria-label="Monthly income and expense chart"></canvas>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="transactionsView">
+          <section class="tool-panel">
+            <div class="panel-heading">
+              <h2>Transactions</h2>
+              <span class="panel-value" id="transactionCount">0 records</span>
+            </div>
+            <div class="filter-grid">
+              <label>
+                <span>Search</span>
+                <input id="searchInput" type="search" placeholder="Category, note, method">
+              </label>
+              <label>
+                <span>Type</span>
+                <select id="typeFilter">
+                  <option value="all">All</option>
+                  <option value="income">Income</option>
+                  <option value="expense">Expense</option>
+                </select>
+              </label>
+              <label>
+                <span>Category</span>
+                <select id="categoryFilter">
+                  <option value="all">All</option>
+                </select>
+              </label>
+              <label>
+                <span>Month</span>
+                <input id="monthFilter" type="month">
+              </label>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Category</th>
+                    <th>Method</th>
+                    <th>Note</th>
+                    <th class="amount-col">Amount</th>
+                    <th class="actions-col">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="transactionTable"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="reportsView">
+          <div class="reports-grid">
+            <section class="tool-panel">
+              <div class="panel-heading">
+                <h2>Selected month</h2>
+                <input id="reportMonth" type="month" aria-label="Report month">
+              </div>
+              <div class="report-list" id="monthReport"></div>
+            </section>
+            <section class="tool-panel">
+              <div class="panel-heading">
+                <h2>Category breakdown</h2>
+                <span class="panel-value" id="reportTotal">INR 0</span>
+              </div>
+              <div class="breakdown-list" id="breakdownList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="settingsView">
+          <section class="tool-panel settings-panel">
+            <div class="panel-heading">
+              <h2>Settings</h2>
+              <span class="panel-value">Saved locally</span>
+            </div>
+            <div class="settings-grid">
+              <label>
+                <span>Monthly budget</span>
+                <input id="budgetInput" type="number" min="0" step="100">
+              </label>
+              <label>
+                <span>Currency</span>
+                <select id="currencyInput">
+                  <option value="INR">INR</option>
+                  <option value="USD">USD</option>
+                  <option value="EUR">EUR</option>
+                  <option value="GBP">GBP</option>
+                </select>
+              </label>
+            </div>
+            <div class="settings-actions">
+              <button class="primary-button" type="button" id="saveSettingsBtn">Save settings</button>
+              <button class="secondary-button" type="button" id="loadSampleBtn">Load sample data</button>
+              <button class="danger-button" type="button" id="clearDataBtn">Clear all data</button>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
