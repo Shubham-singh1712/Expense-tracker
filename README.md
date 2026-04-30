@@ -1,26 +1,32 @@
-# Expense Tracker
+# AutoSpend AI
 
-A dependency-free expense tracker web app built with HTML, CSS, and JavaScript.
+A dependency-free local-first prototype for the full AutoSpend workflow.
 
-## Features
+## Included
 
-- Add, edit, and delete income or expense transactions.
-- Track total income, total expense, balance, and monthly budget usage.
-- View category-wise spending with a chart and breakdown.
-- Compare monthly income and expenses.
-- Filter transactions by search term, type, category, and month.
-- Export filtered transactions as CSV.
-- Print a report from the browser.
-- Save data locally in the browser with `localStorage`.
+- Dashboard with income, expense, balance, monthly budget, charts, and reports.
+- Manual transaction CRUD with category, merchant, method, source, status, and duplicate checks.
+- Cash/no-receipt text parser that turns short natural-language entries into transactions.
+- Receipt/screenshot upload intake that creates review items.
+- Google account and Drive folder simulation for local development.
+- Drive scan simulation with processing queue, statuses, review routing, and duplicate detection.
+- Review inbox with approve, edit, keep-both, and reject actions.
+- Finance assistant that answers from saved local transactions.
+- CSV, JSON, and print export.
+- Browser `localStorage` persistence.
+- Local AI backend proxy for OpenAI-powered parsing and assistant replies.
 
-## How to run
+## Run
 
-Open `EXPENSE TRACKER.html` in a browser.
+Open `index.html` in a browser.
 
-No server, database, or package installation is required.
+## AI setup
 
-## Files
+1. Copy `.env.example` to `.env`.
+2. Put your OpenAI API key in `.env` as `OPENAI_API_KEY=...`.
+3. Run `.\start-backend.ps1`.
+4. In Settings, keep the AI backend URL as `http://127.0.0.1:8787` and use Check AI.
 
-- `index.html` - App layout and UI structure.
-- `styles.css` - Responsive dashboard styling.
-- `app.js` - App state, charts, filters, export, and local storage logic.
+The API key is read only by the local backend. It is not stored in browser `localStorage` or committed into source code.
+
+Live Google OAuth, real Drive API scanning, and hosted PostgreSQL still need separate cloud setup before replacing the local simulation layers.

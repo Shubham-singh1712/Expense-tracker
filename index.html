@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AutoSpend AI</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Local-first finance workspace</p>
+          <h1>AutoSpend AI</h1>
+        </div>
+        <div class="topbar-actions">
+          <button class="icon-button" id="exportCsvBtn" type="button" title="Export CSV" aria-label="Export CSV">CSV</button>
+          <button class="icon-button" id="exportJsonBtn" type="button" title="Export JSON" aria-label="Export JSON">JSN</button>
+          <button class="icon-button" id="printBtn" type="button" title="Print report" aria-label="Print report">PRT</button>
+        </div>
+      </header>
+
+      <nav class="tabs" aria-label="Views">
+        <button class="tab-button active" type="button" data-view="overview">Overview</button>
+        <button class="tab-button" type="button" data-view="transactions">Transactions</button>
+        <button class="tab-button" type="button" data-view="intake">Intake</button>
+        <button class="tab-button" type="button" data-view="review">Review</button>
+        <button class="tab-button" type="button" data-view="reports">Reports</button>
+        <button class="tab-button" type="button" data-view="assistant">Assistant</button>
+        <button class="tab-button" type="button" data-view="settings">Settings</button>
+      </nav>
+
+      <main>
+        <section class="view active" id="overviewView">
+          <section class="summary-grid" aria-label="Financial summary">
+            <article class="metric income"><span>Total income</span><strong id="totalIncome">INR 0</strong></article>
+            <article class="metric expense"><span>Total expense</span><strong id="totalExpense">INR 0</strong></article>
+            <article class="metric balance"><span>Balance</span><strong id="balanceAmount">INR 0</strong></article>
+            <article class="metric budget"><span>Monthly budget used</span><strong id="budgetUsed">0%</strong></article>
+            <article class="metric inbox"><span>Needs review</span><strong id="reviewMetric">0</strong></article>
+            <article class="metric drive"><span>Drive intake</span><strong id="driveMetric">Off</strong></article>
+          </section>
+
+          <div class="layout-grid">
+            <section class="tool-panel transaction-panel">
+              <div class="panel-heading">
+                <h2 id="formTitle">Add transaction</h2>
+                <button class="ghost-button hidden" id="cancelEditBtn" type="button">Cancel edit</button>
+              </div>
+              <form id="transactionForm" autocomplete="off">
+                <input type="hidden" id="editingId">
+                <fieldset class="segmented-control compact">
+                  <legend>Type</legend>
+                  <label><input type="radio" name="type" value="income"><span>Income</span></label>
+                  <label><input type="radio" name="type" value="expense" checked><span>Expense</span></label>
+                </fieldset>
+                <div class="form-grid">
+                  <label><span>Amount</span><input id="amountInput" type="number" min="1" step="0.01" required></label>
+                  <label><span>Date</span><input id="dateInput" type="date" required></label>
+                  <label><span>Merchant</span><input id="merchantInput" type="text" maxlength="60" placeholder="Swiggy, salary, rent"></label>
+                  <label><span>Category</span><select id="categoryInput" required></select></label>
+                  <label><span>Payment mode</span><select id="methodInput"></select></label>
+                  <label><span>Source</span><select id="sourceInput"></select></label>
+                </div>
+                <label><span>Note</span><input id="noteInput" type="text" maxlength="120" placeholder="Optional reference"></label>
+                <button class="primary-button" type="submit" id="saveTransactionBtn">Save transaction</button>
+                <div class="inline-warning hidden" id="duplicateWarning"></div>
+              </form>
+            </section>
+
+            <section class="tool-panel chart-panel">
+              <div class="panel-heading"><h2>Spending by category</h2><span id="categoryChartTotal" class="panel-value">INR 0</span></div>
+              <div class="chart-box"><canvas id="categoryChart" width="520" height="320" aria-label="Expense category chart"></canvas></div>
+              <div class="legend-list" id="categoryLegend"></div>
+            </section>
+
+            <section class="tool-panel chart-panel wide">
+              <div class="panel-heading"><h2>Monthly income vs expense</h2><span class="panel-value" id="savingsRate">0% saved</span></div>
+              <div class="chart-box bar"><canvas id="monthlyChart" width="920" height="300" aria-label="Monthly income and expense chart"></canvas></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="transactionsView">
+          <section class="tool-panel">
+            <div class="panel-heading"><h2>Transactions</h2><span class="panel-value" id="transactionCount">0 records</span></div>
+            <div class="filter-grid">
+              <label><span>Search</span><input id="searchInput" type="search" placeholder="Merchant, category, note"></label>
+              <label><span>Type</span><select id="typeFilter"><option value="all">All</option><option value="income">Income</option><option value="expense">Expense</option></select></label>
+              <label><span>Category</span><select id="categoryFilter"><option value="all">All</option></select></label>
+              <label><span>Month</span><input id="monthFilter" type="month"></label>
+              <label><span>Source</span><select id="sourceFilter"><option value="all">All</option></select></label>
+              <label><span>Status</span><select id="statusFilter"><option value="saved">Saved</option><option value="all">All</option><option value="needs_review">Needs review</option><option value="duplicate">Duplicate</option><option value="ignored">Ignored</option></select></label>
+            </div>
+            <div class="table-wrap"><table><thead><tr><th>Date</th><th>Merchant</th><th>Type</th><th>Category</th><th>Method</th><th>Source</th><th>Status</th><th class="amount-col">Amount</th><th class="actions-col">Actions</th></tr></thead><tbody id="transactionTable"></tbody></table></div>
+          </section>
+        </section>
+
+        <section class="view" id="intakeView">
+          <div class="intake-grid">
+            <section class="tool-panel">
+              <div class="panel-heading"><h2>Cash quick entry</h2><span class="panel-value">Text parser</span></div>
+              <form id="quickEntryForm" class="stack-form">
+                <label><span>Entry text</span><textarea id="quickEntryText" rows="4" placeholder="Paid 420 to Swiggy by UPI for food today"></textarea></label>
+                <button class="primary-button" type="submit">Parse and review</button>
+              </form>
+            </section>
+            <section class="tool-panel">
+              <div class="panel-heading"><h2>Receipt or screenshot</h2><span class="panel-value">Image/PDF intake</span></div>
+              <form id="uploadForm" class="stack-form">
+                <label><span>File</span><input id="uploadInput" type="file" accept="image/*,.pdf"></label>
+                <label><span>Known text</span><textarea id="uploadText" rows="3" placeholder="Optional visible amount, merchant, date, method"></textarea></label>
+                <button class="primary-button" type="submit">Create review item</button>
+              </form>
+            </section>
+            <section class="tool-panel">
+              <div class="panel-heading"><h2>Google Drive</h2><span class="status-dot" id="driveStatus">Not connected</span></div>
+              <div class="drive-actions">
+                <label><span>Folder name</span><input id="driveFolderInput" type="text" placeholder="Expense Screenshots"></label>
+                <button class="secondary-button" id="connectDriveBtn" type="button">Connect Drive</button>
+                <button class="secondary-button" id="scanDriveBtn" type="button">Scan folder</button>
+                <button class="ghost-button" id="disconnectDriveBtn" type="button">Disconnect</button>
+              </div>
+            </section>
+            <section class="tool-panel">
+              <div class="panel-heading"><h2>Processing queue</h2><span class="panel-value" id="queueCount">0 files</span></div>
+              <div class="queue-list" id="queueList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="reviewView">
+          <section class="tool-panel">
+            <div class="panel-heading"><h2>Review inbox</h2><span class="panel-value" id="reviewCount">0 items</span></div>
+            <div class="review-list" id="reviewList"></div>
+          </section>
+        </section>
+
+        <section class="view" id="reportsView">
+          <div class="reports-grid">
+            <section class="tool-panel"><div class="panel-heading"><h2>Selected month</h2><input id="reportMonth" type="month" aria-label="Report month"></div><div class="report-list" id="monthReport"></div></section>
+            <section class="tool-panel"><div class="panel-heading"><h2>Category breakdown</h2><span class="panel-value" id="reportTotal">INR 0</span></div><div class="breakdown-list" id="breakdownList"></div></section>
+            <section class="tool-panel wide-panel"><div class="panel-heading"><h2>Source and merchant insights</h2><span class="panel-value" id="insightTotal">0 records</span></div><div class="insight-grid" id="insightGrid"></div></section>
+          </div>
+        </section>
+
+        <section class="view" id="assistantView">
+          <section class="tool-panel assistant-panel">
+            <div class="panel-heading"><h2>Finance assistant</h2><span class="panel-value">Uses saved transactions</span></div>
+            <div class="chat-log" id="chatLog"></div>
+            <form id="assistantForm" class="assistant-form">
+              <input id="assistantInput" type="text" placeholder="Ask about this month, top merchants, budget, savings">
+              <button class="primary-button" type="submit">Ask</button>
+            </form>
+          </section>
+        </section>
+
+        <section class="view" id="settingsView">
+          <section class="tool-panel settings-panel">
+            <div class="panel-heading"><h2>Settings</h2><span class="panel-value" id="profileStatus">Local profile</span></div>
+            <div class="settings-grid">
+              <label><span>Name</span><input id="profileNameInput" type="text" placeholder="Your name"></label>
+              <label><span>Email</span><input id="profileEmailInput" type="email" placeholder="you@example.com"></label>
+              <label><span>Monthly budget</span><input id="budgetInput" type="number" min="0" step="100"></label>
+              <label><span>Currency</span><select id="currencyInput"><option value="INR">INR</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="GBP">GBP</option></select></label>
+              <label><span>AI backend URL</span><input id="backendUrlInput" type="url" placeholder="http://127.0.0.1:8787"></label>
+              <label><span>Confidence threshold</span><input id="confidenceInput" type="number" min="0" max="1" step="0.05"></label>
+            </div>
+            <div class="settings-actions">
+              <button class="secondary-button" type="button" id="googleLoginBtn">Connect Google</button>
+              <button class="secondary-button" type="button" id="checkBackendBtn">Check AI</button>
+              <button class="primary-button" type="button" id="saveSettingsBtn">Save settings</button>
+              <button class="secondary-button" type="button" id="loadSampleBtn">Load sample data</button>
+              <button class="danger-button" type="button" id="clearDataBtn">Clear all data</button>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
