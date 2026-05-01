@@ -29,4 +29,16 @@ Open `index.html` in a browser.
 
 The API key is read only by the local backend. It is not stored in browser `localStorage` or committed into source code.
 
-Live Google OAuth, real Drive API scanning, and hosted PostgreSQL still need separate cloud setup before replacing the local simulation layers.
+## Google Drive integration
+
+1. Add `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` to `.env`.
+2. Do not leave placeholder values like `replace_with_google_client_id` or `replace_with_google_client_secret`.
+3. Set `GOOGLE_REDIRECT_URI` to `http://127.0.0.1:8787/oauth2callback` in the Google Cloud OAuth consent screen.
+4. Restart the backend.
+5. Open the app and use the Drive section to connect and scan your Drive folder.
+
+## Google Sign-in
+
+The app supports Google OAuth for user authentication. Use the "Sign in with Google" button in Settings to authenticate and populate your profile information.
+
+The same Google Cloud credentials are used for both user auth and Drive access.

@@ -527,7 +527,7 @@ function renderChat() {
 function renderSettings() {
   const profile = state.settings.googleConnected ? "Google connected" : "Local profile";
   els.profileStatus.textContent = state.settings.aiBackendConnected ? `${profile} | AI ready` : profile;
-  els.googleLoginBtn.textContent = state.settings.googleConnected ? "Disconnect Google" : "Connect Google";
+  els.googleLoginBtn.textContent = state.settings.googleConnected ? "Sign out of Google" : "Sign in with Google";
 }
 
 function renderAll() {
@@ -703,6 +703,15 @@ function backendBaseUrl() {
   return (state.settings.backendUrl || "http://127.0.0.1:8787").replace(/\/+$/, "");
 }
 
+async function backendGet(path) {
+  const response = await fetch(`${backendBaseUrl()}${path}`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || `Backend returned ${response.status}`);
+  }
+  return data;
+}
+
 async function backendPost(path, payload) {
   const response = await fetch(`${backendBaseUrl()}${path}`, {
     method: "POST",
@@ -729,6 +738,39 @@ async function checkBackend() {
     persist();
     renderSettings();
     toast("AI backend is not running.");
+  }
+}
+
+async function refreshDriveStatus() {
+  try {
+    const status = await backendGet("/api/drive/status");
+    state.settings.driveConnected = Boolean(status.connected);
+    if (status.folderName) state.settings.driveFolderName = status.folderName;
+    persist();
+    renderAll();
+    return status;
+  } catch {
+    state.settings.driveConnected = false;
+    renderAll();
+    return null;
+  }
+}
+
+async function refreshAuthStatus() {
+  try {
+    const status = await backendGet("/api/auth/status");
+    state.settings.googleConnected = Boolean(status.authenticated);
+    if (status.profile) {
+      state.settings.profileName = status.profile.name || state.settings.profileName;
+      state.settings.profileEmail = status.profile.email || state.settings.profileEmail;
+    }
+    persist();
+    renderAll();
+    return status;
+  } catch {
+    state.settings.googleConnected = false;
+    renderAll();
+    return null;
   }
 }
 
@@ -841,16 +883,25 @@ async function handleUpload(event) {
   toast("Upload added to review.");
 }
 
-function connectDrive() {
-  state.settings.driveConnected = true;
-  state.settings.driveFolderName = els.driveFolderInput.value.trim() || "Expense Screenshots";
-  state.settings.driveFolderId = state.settings.driveFolderId || id("drive-folder");
+async function connectDrive() {
+  state.settings.driveFolderName = els.driveFolderInput.value.trim() || state.settings.driveFolderName;
   persist();
-  renderAll();
-  toast("Drive folder connected locally.");
+  try {
+    const data = await backendGet("/api/drive/auth-url");
+    const popup = window.open(data.authUrl, "_blank", "width=600,height=700");
+    if (!popup) return toast("Allow popups to connect Google Drive.");
+    toast("Drive authorization opened. Complete sign-in in the new window.");
+  } catch (error) {
+    toast(error.message || "Unable to start Google Drive authorization.");
+  }
 }
 
-function disconnectDrive() {
+async function disconnectDrive() {
+  try {
+    await backendGet("/api/drive/disconnect");
+  } catch {
+    // ignore errors; still disconnect locally
+  }
   state.settings.driveConnected = false;
   persist();
   renderAll();
@@ -858,20 +909,37 @@ function disconnectDrive() {
 }
 
 async function scanDrive() {
-  if (!state.settings.driveConnected) return toast("Connect Drive first.");
-  const examples = ["GPay Swiggy INR 420 food today UPI", "Amazon receipt INR 1299 shopping today card", "Airtel bill INR 799 today debit card"];
-  for (const [index, text] of examples.entries()) {
-    const queueItem = { id: id("drv"), name: `${state.settings.driveFolderName}-${index + 1}.png`, sourceType: "drive_screenshot", status: "processing", createdAt: new Date().toISOString() };
-    state.queue.push(queueItem);
-    const tx = await parseSmartText(text, "drive_screenshot");
-    tx.sourceFileId = queueItem.id;
-    tx.confidence = index === 0 ? 0.91 : 0.82;
-    tx.status = tx.confidence >= state.settings.confidenceThreshold ? "saved" : "needs_review";
-    createReview(tx, queueItem);
+  const folderName = els.driveFolderInput.value.trim() || state.settings.driveFolderName;
+  if (state.settings.driveConnected) {
+    try {
+      const data = await backendPost("/api/drive/scan", {
+        folderName,
+        currency: state.settings.currency,
+        today: todayIso()
+      });
+      const files = Array.isArray(data.files) ? data.files : [];
+      files.forEach((item) => {
+        const queueItem = {
+          id: id("drv"),
+          name: item.name,
+          sourceType: "drive_screenshot",
+          status: "processing",
+          createdAt: new Date().toISOString()
+        };
+        state.queue.push(queueItem);
+        const tx = normalizeBackendTx(item.transaction, "drive_screenshot", item.name);
+        tx.sourceFileId = queueItem.id;
+        createReview(tx, queueItem);
+      });
+      persist();
+      renderAll();
+      toast(files.length ? `Imported ${files.length} file(s) from Drive.` : "No new Drive files found.");
+    } catch (error) {
+      toast(error.message || "Drive scan failed.");
+    }
+    return;
   }
-  persist();
-  renderAll();
-  toast("Drive scan processed demo files.");
+  toast("Connect Drive first.");
 }
 
 function reviewAction(action, txId) {
@@ -954,12 +1022,26 @@ function saveSettings() {
 }
 
 function toggleGoogle() {
-  state.settings.googleConnected = !state.settings.googleConnected;
-  if (state.settings.googleConnected && !state.settings.profileEmail) state.settings.profileEmail = "local.user@example.com";
-  persist();
-  setupControls();
-  renderAll();
-  toast(state.settings.googleConnected ? "Google account connected locally." : "Google account disconnected.");
+  if (state.settings.googleConnected) {
+    // Logout
+    backendGet("/api/auth/logout").then(() => {
+      state.settings.googleConnected = false;
+      persist();
+      renderAll();
+      toast("Google account disconnected.");
+    }).catch(() => {
+      toast("Logout failed.");
+    });
+  } else {
+    // Login
+    backendGet("/api/auth/login-url").then((data) => {
+      const popup = window.open(data.loginUrl, "_blank", "width=600,height=700");
+      if (!popup) return toast("Allow popups to sign in with Google.");
+      toast("Google sign-in opened. Complete authentication in the new window.");
+    }).catch((error) => {
+      toast(error.message || "Unable to start Google sign-in.");
+    });
+  }
 }
 
 function loadSampleData() {
@@ -1013,6 +1095,20 @@ function wireEvents() {
   els.tabs.forEach((tab) => tab.addEventListener("click", () => switchView(tab.dataset.view)));
   document.querySelectorAll('input[name="type"]').forEach((input) => input.addEventListener("change", updateCategoryInput));
   els.transactionForm.addEventListener("submit", saveTransaction);
+  window.addEventListener("message", (event) => {
+    if (event?.data?.type !== "autospend-drive-auth" && event?.data?.type !== "autospend-user-auth") return;
+    if (event.data.status === "success") {
+      if (event.data.type === "autospend-drive-auth") {
+        toast("Google Drive authorization completed.");
+        refreshDriveStatus();
+      } else {
+        toast("Google sign-in completed.");
+        refreshAuthStatus();
+      }
+    } else {
+      toast(event.data.message || "Authorization failed.");
+    }
+  });
   els.cancelEditBtn.addEventListener("click", resetForm);
   els.quickEntryForm.addEventListener("submit", handleQuickEntry);
   els.uploadForm.addEventListener("submit", handleUpload);
@@ -1072,7 +1168,12 @@ function escapeHtml(value) {
   return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 }
 
-loadState();
-setupControls();
-wireEvents();
-renderAll();
+async function initializeApp() {
+  loadState();
+  setupControls();
+  wireEvents();
+  await Promise.all([refreshDriveStatus(), refreshAuthStatus()]);
+  renderAll();
+}
+
+initializeApp();
