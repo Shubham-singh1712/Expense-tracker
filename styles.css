@@ -81,6 +81,7 @@ h1 {
 h2 {
   margin-bottom: 0;
   font-size: 1.05rem;
+
 }
 
 h3 {
@@ -276,6 +277,7 @@ h3 {
   font-size: 0.88rem;
   font-weight: 800;
   white-space: nowrap;
+  opacity: 0.3;
 }
 
 .status-dot.connected {

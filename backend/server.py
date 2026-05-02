@@ -123,12 +123,21 @@ def save_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def normalize_env_value(value: str) -> str:
+    if not value:
+        return ""
+    value = value.strip().strip('"').strip("'")
+    if value.startswith("GOOGLE_CLIENT_ID=") or value.startswith("GOOGLE_CLIENT_SECRET=") or value.startswith("GOOGLE_REDIRECT_URI="):
+        _, _, value = value.partition("=")
+    return value.strip()
+
+
 def google_oauth_config() -> tuple[str, str, str]:
-    client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
-    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+    client_id = normalize_env_value(os.environ.get("GOOGLE_CLIENT_ID", ""))
+    client_secret = normalize_env_value(os.environ.get("GOOGLE_CLIENT_SECRET", ""))
     host = os.environ.get("AUTOSPEND_HOST", "127.0.0.1")
     port = os.environ.get("AUTOSPEND_PORT", "8787")
-    redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI", f"http://{host}:{port}{REDIRECT_PATH}")
+    redirect_uri = normalize_env_value(os.environ.get("GOOGLE_REDIRECT_URI", f"http://{host}:{port}{REDIRECT_PATH}"))
     return client_id, client_secret, redirect_uri
 
 
