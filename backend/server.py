@@ -4,7 +4,9 @@ import base64
 import json
 import os
 import re
+import secrets
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -12,9 +14,21 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from db import connect, init_schema, load_snapshot, save_snapshot
+
 
 ROOT = Path(__file__).resolve().parents[1]
+DB_PATH = ROOT / "autospend.db"
+_db_conn = None
+_oauth_lock = threading.Lock()
+_oauth_pending: dict[str, tuple[str, float]] = {}
+OAUTH_STATE_TTL_SEC = 600
 MAX_BODY_BYTES = 16 * 1024 * 1024
+STATIC_FILES: dict[str, Path] = {
+    "/index.html": ROOT / "index.html",
+    "/styles.css": ROOT / "styles.css",
+    "/app.js": ROOT / "app.js",
+}
 DEFAULT_MODEL = "gpt-4.1-mini"
 DRIVE_TOKEN_PATH = ROOT / ".drive_tokens.json"
 DRIVE_STATE_PATH = ROOT / ".drive_state.json"
@@ -150,7 +164,38 @@ def google_oauth_enabled() -> bool:
     return is_google_configured(client_id) and is_google_configured(client_secret)
 
 
-def google_auth_url(scope: str) -> str:
+def register_oauth_state(kind: str) -> str:
+    token = secrets.token_urlsafe(32)
+    now = time.time()
+    with _oauth_lock:
+        dead = [k for k, (_, t) in _oauth_pending.items() if now - t > OAUTH_STATE_TTL_SEC]
+        for k in dead:
+            del _oauth_pending[k]
+        _oauth_pending[token] = (kind, now)
+    return token
+
+
+def consume_oauth_state(state: str) -> str | None:
+    if not state:
+        return None
+    now = time.time()
+    with _oauth_lock:
+        item = _oauth_pending.pop(state, None)
+    if not item:
+        return None
+    kind, started = item
+    if now - started > OAUTH_STATE_TTL_SEC:
+        return None
+    return kind
+
+
+def app_origin() -> str:
+    host = os.environ.get("AUTOSPEND_HOST", "127.0.0.1")
+    port = os.environ.get("AUTOSPEND_PORT", "8787")
+    return f"http://{host}:{port}"
+
+
+def google_auth_url(scope: str, kind: str) -> str:
     client_id, _, redirect_uri = google_oauth_config()
     params = {
         "client_id": client_id,
@@ -160,7 +205,7 @@ def google_auth_url(scope: str) -> str:
         "access_type": "offline",
         "prompt": "consent",
         "include_granted_scopes": "true",
-        "state": f"autospend-{scope.split()[0]}",
+        "state": register_oauth_state(kind),
     }
     return f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}"
 
@@ -386,13 +431,14 @@ def oauth_callback_response(message: str, success: bool = True, auth_type: str =
     message_js = json.dumps(message)
     status_text = "success" if success else "error"
     type_text = "autospend-drive-auth" if auth_type == "drive" else "autospend-user-auth"
+    target_origin = json.dumps(app_origin())
     html = f"""
 <html>
   <head><meta charset=\"utf-8\"></head>
   <body>
     <script>
       if (window.opener) {{
-        window.opener.postMessage({{type: '{type_text}', status: '{status_text}', message: {message_js}}}, '*');
+        window.opener.postMessage({{type: '{type_text}', status: '{status_text}', message: {message_js}}}, {target_origin});
       }}
       document.title = 'Authorization complete';
     </script>
@@ -415,6 +461,8 @@ def openai_request(prompt: str, image_url: str | None = None) -> str:
     payload = {
         "model": os.environ.get("OPENAI_MODEL", DEFAULT_MODEL),
         "store": False,
+        "temperature": 0.15,
+        "max_output_tokens": 1200,
         "input": [{"role": "user", "content": content}],
     }
     request = urllib.request.Request(
@@ -437,14 +485,26 @@ def openai_request(prompt: str, image_url: str | None = None) -> str:
 
 def transaction_prompt(text: str, today: str, currency: str) -> str:
     return f"""
-Extract a personal finance transaction from the user input.
-Today is {today}. Default currency is {currency}.
+You extract exactly ONE personal finance transaction as strict JSON (no markdown, no prose).
 
-Expense categories: {", ".join(EXPENSE_CATEGORIES)}
-Income categories: {", ".join(INCOME_CATEGORIES)}
-Payment methods: {", ".join(PAYMENT_METHODS)}
+Today is {today}. Default currency is {currency}. Prefer ISO date YYYY-MM-DD; if unclear use {today}.
 
-Return only compact JSON with this shape:
+Expense categories (pick one exactly): {", ".join(EXPENSE_CATEGORIES)}
+Income categories (pick one exactly): {", ".join(INCOME_CATEGORIES)}
+Payment methods (pick one exactly): {", ".join(PAYMENT_METHODS)}
+
+Rules:
+- "amount" is a positive number in {currency} (not a string).
+- If the user describes salary, refund, or income, set "type" to "income" and pick an income category.
+- Map UPI/card/credit/debit/wallet/cash from context into payment_method.
+- "confidence" 0.0–1.0: lower if any field is guessed from weak cues.
+- "note" short factual summary (<= 120 chars).
+
+Examples (format only):
+- "Paid 420 Swiggy UPI dinner" -> expense Food 420 Swiggy UPI today
+- "Salary credited 52000 employer" -> income Salary 52000 Bank transfer
+
+Return ONLY this JSON shape:
 {{
   "type": "expense",
   "amount": 0,
@@ -454,7 +514,7 @@ Return only compact JSON with this shape:
   "category": "Other expense",
   "payment_method": "Cash",
   "note": "",
-  "confidence": 0.0
+  "confidence": 0.85
 }}
 
 User input:
@@ -465,13 +525,19 @@ User input:
 def assistant_prompt(question: str, transactions: list[dict], settings: dict) -> str:
     compact_transactions = transactions[-250:]
     return f"""
-You are AutoSpend's finance assistant. Answer only from the transaction data supplied.
-Keep the answer short and practical. If the data is missing, say what is missing.
+You are AutoSpend's finance assistant for an Indian household budget app.
+
+Answer ONLY using the JSON transaction list and settings below. If the answer is not supported by the data, say exactly what is missing (e.g. no transactions for that month).
+
+Style:
+- 2–5 short sentences OR bullet points; mention currency from settings when giving amounts.
+- When comparing totals, show the numbers you used (e.g. income X, expense Y).
+- Do not invent merchants, dates, or amounts not present in the data.
 
 Settings:
 {json.dumps(settings, ensure_ascii=False)}
 
-Transactions:
+Transactions (most recent last; fields may include type, amount, date, merchant, category, method, note, status):
 {json.dumps(compact_transactions, ensure_ascii=False)}
 
 Question:
@@ -492,17 +558,45 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.end_headers()
 
+    def serve_static(self, file_path: Path) -> None:
+        try:
+            body = file_path.read_bytes()
+        except OSError:
+            self.json_response({"error": "Not found"}, status=404)
+            return
+        mime = "application/octet-stream"
+        if file_path.suffix.lower() == ".html":
+            mime = "text/html; charset=utf-8"
+        elif file_path.suffix.lower() == ".css":
+            mime = "text/css; charset=utf-8"
+        elif file_path.suffix.lower() == ".js":
+            mime = "application/javascript; charset=utf-8"
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
-        path = parsed.path.rstrip("/")
-        if path in ("", "/api/health"):
+        req_path = parsed.path
+        route = req_path.rstrip("/") or "/"
+        if route == "/":
+            self.serve_static(ROOT / "index.html")
+            return
+        if route == "/api/health":
             self.json_response({
                 "ok": True,
                 "provider": "openai",
                 "model": os.environ.get("OPENAI_MODEL", DEFAULT_MODEL),
                 "keyConfigured": bool(os.environ.get("OPENAI_API_KEY")),
+                "database": str(DB_PATH.name),
             })
             return
+        if route in STATIC_FILES:
+            self.serve_static(STATIC_FILES[route])
+            return
+        path = route
         if path == "/api/drive/status":
             self.handle_drive_status()
             return
@@ -521,6 +615,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/auth/logout":
             self.handle_auth_logout()
             return
+        if path == "/api/data":
+            self.handle_data_get()
+            return
         if path == "/oauth2callback":
             self.handle_oauth2_callback(parsed.query)
             return
@@ -528,15 +625,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         try:
+            route = urllib.parse.urlparse(self.path).path.rstrip("/") or "/"
             payload = self.read_json()
-            if self.path == "/api/parse-text":
+            if route == "/api/parse-text":
                 self.handle_parse_text(payload)
-            elif self.path == "/api/parse-image":
+            elif route == "/api/parse-image":
                 self.handle_parse_image(payload)
-            elif self.path == "/api/assistant":
+            elif route == "/api/assistant":
                 self.handle_assistant(payload)
-            elif self.path == "/api/drive/scan":
+            elif route == "/api/drive/scan":
                 self.handle_drive_scan(payload)
+            elif route == "/api/data":
+                self.handle_data_post(payload)
             else:
                 self.json_response({"error": "Not found"}, status=404)
         except RuntimeError as error:
@@ -564,8 +664,19 @@ class Handler(BaseHTTPRequestHandler):
         currency = str(payload.get("currency") or "INR").upper()
         today = str(payload.get("today") or "")
         image_url = str(payload.get("dataUrl") or "")
+        mime = str(payload.get("mimeType") or "").lower()
+        is_pdf = mime == "application/pdf" or image_url.startswith("data:application/pdf")
         text = f"Filename: {filename}\nVisible text hint: {hint}".strip()
-        parsed = parse_json_text(openai_request(transaction_prompt(text, today, currency), image_url=image_url))
+        if is_pdf:
+            pdf_note = (
+                f"The user uploaded a PDF receipt ({filename}). There is no rendered page image; "
+                "infer one transaction only from the filename and any visible-text hint. "
+                "If you cannot infer amount or date, set amount 0, date empty, confidence under 0.4, and explain in note."
+            )
+            parsed = parse_json_text(openai_request(transaction_prompt(f"{pdf_note}\n\n{text}", today, currency)))
+            self.json_response({"transaction": normalize_transaction(parsed, currency)})
+            return
+        parsed = parse_json_text(openai_request(transaction_prompt(text, today, currency), image_url=image_url or None))
         self.json_response({"transaction": normalize_transaction(parsed, currency)})
 
     def handle_assistant(self, payload: dict) -> None:
@@ -582,7 +693,7 @@ class Handler(BaseHTTPRequestHandler):
         if not google_oauth_enabled():
             self.json_response({"error": "Google OAuth is not configured."}, status=503)
             return
-        self.json_response({"authUrl": google_auth_url(DRIVE_SCOPE)})
+        self.json_response({"authUrl": google_auth_url(DRIVE_SCOPE, "drive")})
 
     def handle_drive_disconnect(self) -> None:
         clear_drive_tokens()
@@ -602,17 +713,56 @@ class Handler(BaseHTTPRequestHandler):
         if not google_oauth_enabled():
             self.json_response({"error": "Google OAuth is not configured."}, status=503)
             return
-        self.json_response({"loginUrl": google_auth_url(USER_SCOPE)})
+        self.json_response({"loginUrl": google_auth_url(USER_SCOPE, "user")})
 
     def handle_auth_logout(self) -> None:
         clear_user_tokens()
         self.json_response({"authenticated": False})
 
+    def handle_data_get(self) -> None:
+        global _db_conn
+        row = load_snapshot(_db_conn)
+        if not row:
+            self.json_response({"transactions": [], "queue": [], "chat": [], "settings": {}, "savedAt": None})
+            return
+        self.json_response(row)
+
+    def handle_data_post(self, payload: dict) -> None:
+        global _db_conn
+        if not isinstance(payload, dict):
+            self.json_response({"error": "Expected JSON object"}, status=400)
+            return
+        tx = payload.get("transactions")
+        if tx is not None and not isinstance(tx, list):
+            self.json_response({"error": "transactions must be a list"}, status=400)
+            return
+        queue = payload.get("queue")
+        if queue is not None and not isinstance(queue, list):
+            self.json_response({"error": "queue must be a list"}, status=400)
+            return
+        chat = payload.get("chat")
+        if chat is not None and not isinstance(chat, list):
+            self.json_response({"error": "chat must be a list"}, status=400)
+            return
+        settings = payload.get("settings")
+        if settings is not None and not isinstance(settings, dict):
+            self.json_response({"error": "settings must be an object"}, status=400)
+            return
+        to_save = {
+            "transactions": list(tx) if isinstance(tx, list) else [],
+            "queue": list(queue) if isinstance(queue, list) else [],
+            "chat": list(chat) if isinstance(chat, list) else [],
+            "settings": dict(settings) if isinstance(settings, dict) else {},
+        }
+        saved_at = save_snapshot(_db_conn, to_save)
+        self.json_response({"ok": True, "savedAt": saved_at})
+
     def handle_oauth2_callback(self, query: str) -> None:
         params = urllib.parse.parse_qs(query)
         error = params.get("error", [""])[0]
-        state = params.get("state", [""])[0]
-        auth_type = "drive" if "drive" in state else "user"
+        state_raw = params.get("state", [""])[0]
+        kind = consume_oauth_state(state_raw)
+        auth_type = "drive" if kind == "drive" else "user"
         if error:
             content = oauth_callback_response(f"Authorization failed: {error}", success=False, auth_type=auth_type)
             self.send_response(200)
@@ -625,8 +775,20 @@ class Handler(BaseHTTPRequestHandler):
         if not code:
             self.json_response({"error": "Missing authorization code."}, status=400)
             return
+        if kind not in ("drive", "user"):
+            content = oauth_callback_response(
+                "Invalid or expired authorization state. Close this window and try signing in again.",
+                success=False,
+                auth_type="user",
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+            return
         tokens = exchange_google_code(code)
-        if "drive" in state:
+        if kind == "drive":
             save_drive_tokens(tokens)
             message = "Drive authorization completed successfully."
             auth_type = "drive"
@@ -654,11 +816,16 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    global _db_conn
     load_dotenv()
     host = os.environ.get("AUTOSPEND_HOST", "127.0.0.1")
     port = int(os.environ.get("AUTOSPEND_PORT", "8787"))
+    _db_conn = connect(DB_PATH)
+    init_schema(_db_conn)
     server = ThreadingHTTPServer((host, port), Handler)
     print(f"AutoSpend AI backend running at http://{host}:{port}")
+    print(f"Open the app in your browser: http://{host}:{port}/")
+    print(f"SQLite data: {DB_PATH}")
     print(f"OpenAI key configured: {bool(os.environ.get('OPENAI_API_KEY'))}")
     server.serve_forever()
 

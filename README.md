@@ -13,12 +13,14 @@ A dependency-free local-first prototype for the full AutoSpend workflow.
 - Review inbox with approve, edit, keep-both, and reject actions.
 - Finance assistant that answers from saved local transactions.
 - CSV, JSON, and print export.
-- Browser `localStorage` persistence.
+- Browser `localStorage` plus optional **SQLite** sync via the local backend (`autospend.db` in the project folder).
 - Local AI backend proxy for OpenAI-powered parsing and assistant replies.
 
 ## Run
 
-Open `index.html` in a browser.
+**Recommended:** run `.\start-autospend.ps1` — it creates `.env` if missing, starts the backend in a new window, and opens the app at `http://127.0.0.1:8787/`.
+
+Alternatively run `.\start-backend.ps1` (or `python .\backend\server.py` from the project folder), then open `http://127.0.0.1:8787/` in your browser. You can still open `index.html` directly, but using the same origin as the API avoids browser restrictions and keeps Google OAuth popups working reliably.
 
 ## AI setup
 
@@ -42,3 +44,5 @@ The API key is read only by the local backend. It is not stored in browser `loca
 The app supports Google OAuth for user authentication. Use the "Sign in with Google" button in Settings to authenticate and populate your profile information.
 
 The same Google Cloud credentials are used for both user auth and Drive access.
+
+Open the app at `http://127.0.0.1:8787/` (not as a raw `file://` page) so Google OAuth popups can post a result back to your tab securely.

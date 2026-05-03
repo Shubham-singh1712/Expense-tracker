@@ -4,3 +4,4 @@ __pycache__/
 .drive_tokens.json
 .drive_state.json
 .user_tokens.json
+autospend.db

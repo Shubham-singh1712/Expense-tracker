@@ -109,6 +109,7 @@
               <div class="panel-heading"><h2>Receipt or screenshot</h2><span class="panel-value">Image/PDF intake</span></div>
               <form id="uploadForm" class="stack-form">
                 <label><span>File</span><input id="uploadInput" type="file" accept="image/*,.pdf"></label>
+                <p class="field-hint">Images up to 12 MB (JPEG/PNG/WebP). PDFs use your hint text and filename unless you add visible details below.</p>
                 <label><span>Known text</span><textarea id="uploadText" rows="3" placeholder="Optional visible amount, merchant, date, method"></textarea></label>
                 <button class="primary-button" type="submit">Create review item</button>
               </form>
@@ -165,6 +166,7 @@
               <label><span>Currency</span><select id="currencyInput"><option value="INR">INR</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="GBP">GBP</option></select></label>
               <label><span>AI backend URL</span><input id="backendUrlInput" type="url" placeholder="http://127.0.0.1:8787"></label>
               <label><span>Confidence threshold</span><input id="confidenceInput" type="number" min="0" max="1" step="0.05"></label>
+              <label class="checkbox-row"><input id="serverSyncInput" type="checkbox" checked> <span>Sync wallet to local server (SQLite file on this PC)</span></label>
             </div>
             <div class="settings-actions">
               <button class="secondary-button" type="button" id="googleLoginBtn">Connect Google</button>

@@ -26,7 +26,9 @@ const state = {
     driveFolderId: "",
     backendUrl: "http://127.0.0.1:8787",
     aiBackendConnected: false,
-    confidenceThreshold: 0.85
+    confidenceThreshold: 0.85,
+    useServerSync: true,
+    serverDataSavedAt: 0
   }
 };
 
@@ -96,6 +98,7 @@ const els = {
   backendUrlInput: $("backendUrlInput"),
   checkBackendBtn: $("checkBackendBtn"),
   confidenceInput: $("confidenceInput"),
+  serverSyncInput: $("serverSyncInput"),
   googleLoginBtn: $("googleLoginBtn"),
   saveSettingsBtn: $("saveSettingsBtn"),
   loadSampleBtn: $("loadSampleBtn"),
@@ -128,11 +131,88 @@ function read(key, fallback) {
   }
 }
 
-function persist() {
-  localStorage.setItem(keys.transactions, JSON.stringify(state.transactions));
-  localStorage.setItem(keys.settings, JSON.stringify(state.settings));
-  localStorage.setItem(keys.queue, JSON.stringify(state.queue));
-  localStorage.setItem(keys.chat, JSON.stringify(state.chat));
+let serverPushTimer;
+
+function persist(options = {}) {
+  const localOnly = options.localOnly === true;
+  try {
+    localStorage.setItem(keys.transactions, JSON.stringify(state.transactions));
+    localStorage.setItem(keys.settings, JSON.stringify(state.settings));
+    localStorage.setItem(keys.queue, JSON.stringify(state.queue));
+    localStorage.setItem(keys.chat, JSON.stringify(state.chat));
+  } catch (err) {
+    console.warn("localStorage unavailable or full", err);
+    if (!localOnly) toast("Could not save in the browser (storage may be full). Server copy may still update.");
+  }
+  if (!localOnly) scheduleServerPush();
+}
+
+function scheduleServerPush() {
+  if (state.settings.useServerSync === false) return;
+  clearTimeout(serverPushTimer);
+  serverPushTimer = setTimeout(pushServerData, 450);
+}
+
+async function pushServerData() {
+  if (state.settings.useServerSync === false) return;
+  try {
+    const response = await fetch(`${backendBaseUrl()}/api/data`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        transactions: state.transactions,
+        queue: state.queue,
+        chat: state.chat,
+        settings: state.settings
+      })
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    if (data.savedAt != null) state.settings.serverDataSavedAt = Number(data.savedAt);
+    persist({ localOnly: true });
+  } catch (err) {
+    console.warn("Server sync failed", err);
+  }
+}
+
+function backendOrigin() {
+  try {
+    return new URL(backendBaseUrl()).origin;
+  } catch {
+    return "";
+  }
+}
+
+async function pullServerData() {
+  if (state.settings.useServerSync === false) return;
+  try {
+    const response = await fetch(`${backendBaseUrl()}/api/data`);
+    if (!response.ok) return;
+    const data = await response.json();
+    const serverCount = Array.isArray(data.transactions) ? data.transactions.length : 0;
+    const localCount = state.transactions.length;
+    const serverTs = Number(data.savedAt) || 0;
+    if (serverCount === 0 && localCount > 0) {
+      await pushServerData();
+      return;
+    }
+    if (serverCount === 0) return;
+    const localTs = Number(state.settings.serverDataSavedAt) || 0;
+    if (serverTs >= localTs || localCount === 0) applyServerSnapshot(data);
+  } catch (err) {
+    console.warn("Server data pull skipped", err);
+  }
+}
+
+function applyServerSnapshot(data) {
+  state.transactions = Array.isArray(data.transactions) ? data.transactions.map(asTx) : [];
+  state.queue = Array.isArray(data.queue) ? data.queue : [];
+  if (Array.isArray(data.chat) && data.chat.length) state.chat = data.chat;
+  if (data.settings && typeof data.settings === "object") {
+    state.settings = { ...state.settings, ...data.settings };
+  }
+  if (data.savedAt != null) state.settings.serverDataSavedAt = Number(data.savedAt);
+  persist({ localOnly: true });
 }
 
 function money(amount) {
@@ -206,7 +286,7 @@ function loadState() {
   if (!state.chat.length) {
     state.chat = [{ from: "assistant", text: "Ask me about budget, top spending, merchants, reports, or savings." }];
   }
-  persist();
+  persist({ localOnly: true });
 }
 
 function selectedType() {
@@ -249,6 +329,7 @@ function setupControls() {
   els.confidenceInput.value = state.settings.confidenceThreshold;
   els.driveFolderInput.value = state.settings.driveFolderName;
   els.backendUrlInput.value = state.settings.backendUrl || "http://127.0.0.1:8787";
+  if (els.serverSyncInput) els.serverSyncInput.checked = state.settings.useServerSync !== false;
   updateCategoryInput();
 }
 
@@ -810,6 +891,8 @@ async function parseSmartText(text, sourceType) {
   }
 }
 
+const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
+
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -819,13 +902,53 @@ function fileToDataUrl(file) {
   });
 }
 
+async function fileToDataUrlMaybeCompress(file) {
+  if (!file.type.startsWith("image/") || file.size < 1_400_000) {
+    return fileToDataUrl(file);
+  }
+  try {
+    const bitmap = await createImageBitmap(file);
+    const maxW = 2048;
+    let w = bitmap.width;
+    let h = bitmap.height;
+    if (w > maxW) {
+      h = Math.round((h * maxW) / w);
+      w = maxW;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return fileToDataUrl(file);
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close();
+    return canvas.toDataURL("image/jpeg", 0.88);
+  } catch {
+    return fileToDataUrl(file);
+  }
+}
+
 async function parseSmartImage(file, textHint) {
   try {
-    if (file.type.startsWith("image/")) {
+    const mimeType = file.type || "";
+    if (mimeType === "application/pdf") {
+      const dataUrl = await fileToDataUrl(file);
       const data = await backendPost("/api/parse-image", {
         filename: file.name,
-        mimeType: file.type,
-        dataUrl: await fileToDataUrl(file),
+        mimeType,
+        dataUrl,
+        textHint,
+        currency: state.settings.currency,
+        today: todayIso()
+      });
+      return normalizeBackendTx(data.transaction, "receipt_upload", textHint || file.name);
+    }
+    if (mimeType.startsWith("image/")) {
+      const dataUrl = await fileToDataUrlMaybeCompress(file);
+      const data = await backendPost("/api/parse-image", {
+        filename: file.name,
+        mimeType,
+        dataUrl,
         textHint,
         currency: state.settings.currency,
         today: todayIso()
@@ -869,6 +992,9 @@ async function handleUpload(event) {
   event.preventDefault();
   const file = els.uploadInput.files[0];
   if (!file) return toast("Choose a file first.");
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return toast("File is too large (max 12 MB). Try a smaller photo or export a JPEG.");
+  }
   const rawText = els.uploadText.value.trim();
   const queueItem = { id: id("file"), name: file.name, sourceType: file.type === "application/pdf" ? "drive_receipt" : "receipt_upload", status: "processing", createdAt: new Date().toISOString() };
   state.queue.push(queueItem);
@@ -1016,6 +1142,7 @@ function saveSettings() {
   state.settings.currency = els.currencyInput.value;
   state.settings.confidenceThreshold = Number.isFinite(threshold) ? Math.min(1, Math.max(0, threshold)) : 0.85;
   state.settings.backendUrl = els.backendUrlInput.value.trim() || "http://127.0.0.1:8787";
+  if (els.serverSyncInput) state.settings.useServerSync = els.serverSyncInput.checked;
   persist();
   renderAll();
   toast("Settings saved.");
@@ -1096,6 +1223,8 @@ function wireEvents() {
   document.querySelectorAll('input[name="type"]').forEach((input) => input.addEventListener("change", updateCategoryInput));
   els.transactionForm.addEventListener("submit", saveTransaction);
   window.addEventListener("message", (event) => {
+    const origin = backendOrigin();
+    if (origin && event.origin !== origin) return;
     if (event?.data?.type !== "autospend-drive-auth" && event?.data?.type !== "autospend-user-auth") return;
     if (event.data.status === "success") {
       if (event.data.type === "autospend-drive-auth") {
@@ -1172,7 +1301,8 @@ async function initializeApp() {
   loadState();
   setupControls();
   wireEvents();
-  await Promise.all([refreshDriveStatus(), refreshAuthStatus()]);
+  await Promise.all([pullServerData(), refreshDriveStatus(), refreshAuthStatus()]);
+  setupControls();
   renderAll();
 }
 
