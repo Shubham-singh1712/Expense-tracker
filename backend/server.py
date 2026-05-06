@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import json
 import os
-import re
 import secrets
 import sys
 import threading
@@ -14,7 +13,17 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from db import connect, init_schema, load_snapshot, save_snapshot
+from ai_client import assistant_prompt, llm_health_info, openai_request
+from catalog import EXPENSE_CATEGORIES, INCOME_CATEGORIES, PAYMENT_METHODS
+from db import (
+    connect,
+    correct_transaction_ledger,
+    init_schema,
+    load_snapshot,
+    save_snapshot,
+    sync_transactions_from_client,
+)
+from ingest_pipeline import fetch_history_summaries, run_image_pipeline, run_text_pipeline
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,30 +38,12 @@ STATIC_FILES: dict[str, Path] = {
     "/styles.css": ROOT / "styles.css",
     "/app.js": ROOT / "app.js",
 }
-DEFAULT_MODEL = "gpt-4.1-mini"
 DRIVE_TOKEN_PATH = ROOT / ".drive_tokens.json"
 DRIVE_STATE_PATH = ROOT / ".drive_state.json"
 DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 USER_TOKEN_PATH = ROOT / ".user_tokens.json"
 USER_SCOPE = "openid profile email"
 REDIRECT_PATH = os.environ.get("GOOGLE_REDIRECT_PATH", "/oauth2callback")
-
-EXPENSE_CATEGORIES = [
-    "Food",
-    "Transport",
-    "Rent",
-    "Shopping",
-    "Bills",
-    "Health",
-    "Education",
-    "Entertainment",
-    "Travel",
-    "Subscription",
-    "Other expense",
-]
-INCOME_CATEGORIES = ["Salary", "Freelance", "Investment", "Gift", "Refund", "Other income"]
-PAYMENT_METHODS = ["Cash", "UPI", "Debit card", "Credit card", "Bank transfer", "Wallet"]
-
 
 def load_dotenv() -> None:
     for env_path in (ROOT / ".env", Path(__file__).resolve().parent / ".env"):
@@ -64,28 +55,6 @@ def load_dotenv() -> None:
                 continue
             key, value = clean.split("=", 1)
             os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
-
-
-def output_text(response: dict) -> str:
-    if isinstance(response.get("output_text"), str):
-        return response["output_text"]
-    parts: list[str] = []
-    for item in response.get("output", []):
-        for content in item.get("content", []):
-            text = content.get("text")
-            if isinstance(text, str):
-                parts.append(text)
-    return "\n".join(parts).strip()
-
-
-def parse_json_text(text: str) -> dict:
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, re.S)
-        if not match:
-            raise
-        return json.loads(match.group(0))
 
 
 def clamp_confidence(value: object) -> float:
@@ -405,12 +374,20 @@ def drive_status() -> dict:
 
 
 def drive_scan_payload(folder_name: str, currency: str, today: str) -> list[dict]:
+    global _db_conn
     folder_id = find_drive_folder(folder_name)
     if not folder_id:
         raise RuntimeError(f"Drive folder '{folder_name}' not found")
     files = list_drive_files(folder_id)
-    state = load_drive_state()
-    processed = set(state.get("processed_file_ids", []))
+    snapshot = load_snapshot(_db_conn) or {}
+    processed = set()
+    for tx in snapshot.get("transactions", []):
+        if isinstance(tx, dict) and tx.get("driveFileId"):
+            processed.add(tx["driveFileId"])
+    for q in snapshot.get("queue", []):
+        if isinstance(q, dict) and q.get("driveFileId"):
+            processed.add(q["driveFileId"])
+    
     new_items = []
     for file_info in files:
         if file_info["id"] in processed:
@@ -418,12 +395,24 @@ def drive_scan_payload(folder_name: str, currency: str, today: str) -> list[dict
         data, mime_type = drive_file_media(file_info["id"])
         encoded = base64.b64encode(data).decode("ascii")
         data_url = f"data:{mime_type};base64,{encoded}"
-        prompt = f"Filename: {file_info['name']}\nFolder: {folder_name}"
-        parsed = parse_json_text(openai_request(transaction_prompt(prompt, today, currency), image_url=data_url))
-        new_items.append({"fileId": file_info["id"], "name": file_info["name"], "transaction": normalize_transaction(parsed, currency)})
+        batch = run_image_pipeline(
+            _db_conn,
+            normalize_transaction,
+            hint=file_info["name"],
+            filename=file_info["name"],
+            mime=mime_type or "image/jpeg",
+            data_url=data_url,
+            currency=currency,
+            today=today,
+            source="drive_scan",
+        )
+        new_items.append({
+            "fileId": file_info["id"],
+            "name": file_info["name"],
+            "transaction": batch["transaction"],
+            "analysis": batch.get("analysis"),
+        })
         processed.add(file_info["id"])
-    state["processed_file_ids"] = list(processed)
-    save_drive_state(state)
     return new_items
 
 
@@ -447,102 +436,6 @@ def oauth_callback_response(message: str, success: bool = True, auth_type: str =
 </html>
 """
     return html.encode("utf-8")
-
-
-def openai_request(prompt: str, image_url: str | None = None) -> str:
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not configured")
-
-    content = [{"type": "input_text", "text": prompt}]
-    if image_url:
-        content.append({"type": "input_image", "image_url": image_url, "detail": "auto"})
-
-    payload = {
-        "model": os.environ.get("OPENAI_MODEL", DEFAULT_MODEL),
-        "store": False,
-        "temperature": 0.15,
-        "max_output_tokens": 1200,
-        "input": [{"role": "user", "content": content}],
-    }
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            body = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenAI API error {error.code}: {detail}") from error
-    return output_text(body)
-
-
-def transaction_prompt(text: str, today: str, currency: str) -> str:
-    return f"""
-You extract exactly ONE personal finance transaction as strict JSON (no markdown, no prose).
-
-Today is {today}. Default currency is {currency}. Prefer ISO date YYYY-MM-DD; if unclear use {today}.
-
-Expense categories (pick one exactly): {", ".join(EXPENSE_CATEGORIES)}
-Income categories (pick one exactly): {", ".join(INCOME_CATEGORIES)}
-Payment methods (pick one exactly): {", ".join(PAYMENT_METHODS)}
-
-Rules:
-- "amount" is a positive number in {currency} (not a string).
-- If the user describes salary, refund, or income, set "type" to "income" and pick an income category.
-- Map UPI/card/credit/debit/wallet/cash from context into payment_method.
-- "confidence" 0.0–1.0: lower if any field is guessed from weak cues.
-- "note" short factual summary (<= 120 chars).
-
-Examples (format only):
-- "Paid 420 Swiggy UPI dinner" -> expense Food 420 Swiggy UPI today
-- "Salary credited 52000 employer" -> income Salary 52000 Bank transfer
-
-Return ONLY this JSON shape:
-{{
-  "type": "expense",
-  "amount": 0,
-  "currency": "{currency}",
-  "date": "YYYY-MM-DD",
-  "merchant": "Unknown",
-  "category": "Other expense",
-  "payment_method": "Cash",
-  "note": "",
-  "confidence": 0.85
-}}
-
-User input:
-{text}
-""".strip()
-
-
-def assistant_prompt(question: str, transactions: list[dict], settings: dict) -> str:
-    compact_transactions = transactions[-250:]
-    return f"""
-You are AutoSpend's finance assistant for an Indian household budget app.
-
-Answer ONLY using the JSON transaction list and settings below. If the answer is not supported by the data, say exactly what is missing (e.g. no transactions for that month).
-
-Style:
-- 2–5 short sentences OR bullet points; mention currency from settings when giving amounts.
-- When comparing totals, show the numbers you used (e.g. income X, expense Y).
-- Do not invent merchants, dates, or amounts not present in the data.
-
-Settings:
-{json.dumps(settings, ensure_ascii=False)}
-
-Transactions (most recent last; fields may include type, amount, date, merchant, category, method, note, status):
-{json.dumps(compact_transactions, ensure_ascii=False)}
-
-Question:
-{question}
-""".strip()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -585,12 +478,21 @@ class Handler(BaseHTTPRequestHandler):
             self.serve_static(ROOT / "index.html")
             return
         if route == "/api/health":
+            global _db_conn
+            ledger_rows = 0
+            try:
+                lc = _db_conn.execute("SELECT COUNT(*) AS c FROM tx_ledger").fetchone()
+                ledger_rows = int(lc["c"]) if lc else 0
+            except Exception:
+                pass
+            llm = llm_health_info()
             self.json_response({
                 "ok": True,
-                "provider": "openai",
-                "model": os.environ.get("OPENAI_MODEL", DEFAULT_MODEL),
-                "keyConfigured": bool(os.environ.get("OPENAI_API_KEY")),
+                "provider": llm["provider"],
+                "model": llm["model"],
+                "keyConfigured": llm["keyConfigured"],
                 "database": str(DB_PATH.name),
+                "ledgerRows": ledger_rows,
             })
             return
         if route in STATIC_FILES:
@@ -637,6 +539,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.handle_drive_scan(payload)
             elif route == "/api/data":
                 self.handle_data_post(payload)
+            elif route == "/api/transaction/correct":
+                self.handle_transaction_correct(payload)
             else:
                 self.json_response({"error": "Not found"}, status=404)
         except RuntimeError as error:
@@ -655,8 +559,9 @@ class Handler(BaseHTTPRequestHandler):
         text = str(payload.get("text") or "")
         currency = str(payload.get("currency") or "INR").upper()
         today = str(payload.get("today") or "")
-        parsed = parse_json_text(openai_request(transaction_prompt(text, today, currency)))
-        self.json_response({"transaction": normalize_transaction(parsed, currency)})
+        global _db_conn
+        result = run_text_pipeline(_db_conn, normalize_transaction, text, currency, today, source="parse_text")
+        self.json_response(result)
 
     def handle_parse_image(self, payload: dict) -> None:
         hint = str(payload.get("textHint") or "")
@@ -665,25 +570,27 @@ class Handler(BaseHTTPRequestHandler):
         today = str(payload.get("today") or "")
         image_url = str(payload.get("dataUrl") or "")
         mime = str(payload.get("mimeType") or "").lower()
-        is_pdf = mime == "application/pdf" or image_url.startswith("data:application/pdf")
-        text = f"Filename: {filename}\nVisible text hint: {hint}".strip()
-        if is_pdf:
-            pdf_note = (
-                f"The user uploaded a PDF receipt ({filename}). There is no rendered page image; "
-                "infer one transaction only from the filename and any visible-text hint. "
-                "If you cannot infer amount or date, set amount 0, date empty, confidence under 0.4, and explain in note."
-            )
-            parsed = parse_json_text(openai_request(transaction_prompt(f"{pdf_note}\n\n{text}", today, currency)))
-            self.json_response({"transaction": normalize_transaction(parsed, currency)})
-            return
-        parsed = parse_json_text(openai_request(transaction_prompt(text, today, currency), image_url=image_url or None))
-        self.json_response({"transaction": normalize_transaction(parsed, currency)})
+        global _db_conn
+        result = run_image_pipeline(
+            _db_conn,
+            normalize_transaction,
+            hint=hint,
+            filename=filename,
+            mime=mime,
+            data_url=image_url,
+            currency=currency,
+            today=today,
+            source="upload",
+        )
+        self.json_response(result)
 
     def handle_assistant(self, payload: dict) -> None:
         question = str(payload.get("question") or "")
         transactions = payload.get("transactions") if isinstance(payload.get("transactions"), list) else []
         settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
-        answer = openai_request(assistant_prompt(question, transactions, settings))
+        global _db_conn
+        ledger_hint = fetch_history_summaries(_db_conn, 10)
+        answer = openai_request(assistant_prompt(question, transactions, settings, ledger_history=ledger_hint))
         self.json_response({"answer": answer})
 
     def handle_drive_status(self) -> None:
@@ -755,7 +662,19 @@ class Handler(BaseHTTPRequestHandler):
             "settings": dict(settings) if isinstance(settings, dict) else {},
         }
         saved_at = save_snapshot(_db_conn, to_save)
+        sync_transactions_from_client(_db_conn, to_save["transactions"])
         self.json_response({"ok": True, "savedAt": saved_at})
+
+    def handle_transaction_correct(self, payload: dict) -> None:
+        global _db_conn
+        tx_id = str(payload.get("id") or "").strip()
+        tx_payload = payload.get("transaction")
+        if not tx_id or not isinstance(tx_payload, dict):
+            self.json_response({"error": "Provide id and transaction object"}, status=400)
+            return
+        analysis = payload.get("analysis") if isinstance(payload.get("analysis"), dict) else None
+        ok = correct_transaction_ledger(_db_conn, tx_id, tx_payload, analysis)
+        self.json_response({"ok": bool(ok), "synced": ok})
 
     def handle_oauth2_callback(self, query: str) -> None:
         params = urllib.parse.parse_qs(query)
@@ -826,7 +745,8 @@ def main() -> None:
     print(f"AutoSpend AI backend running at http://{host}:{port}")
     print(f"Open the app in your browser: http://{host}:{port}/")
     print(f"SQLite data: {DB_PATH}")
-    print(f"OpenAI key configured: {bool(os.environ.get('OPENAI_API_KEY'))}")
+    hi = llm_health_info()
+    print(f"LLM provider={hi['provider']} model={hi['model']} key_configured={hi['keyConfigured']}")
     server.serve_forever()
 
 

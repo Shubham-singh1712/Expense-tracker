@@ -14,7 +14,7 @@ A dependency-free local-first prototype for the full AutoSpend workflow.
 - Finance assistant that answers from saved local transactions.
 - CSV, JSON, and print export.
 - Browser `localStorage` plus optional **SQLite** sync via the local backend (`autospend.db` in the project folder).
-- Local AI backend proxy for OpenAI-powered parsing and assistant replies.
+- Local AI backend: **OpenAI** (Responses API) or **OpenRouter** (e.g. `google/gemini-2.5-flash`) for parsing and assistant replies.
 
 ## Run
 
@@ -25,11 +25,12 @@ Alternatively run `.\start-backend.ps1` (or `python .\backend\server.py` from th
 ## AI setup
 
 1. Copy `.env.example` to `.env`.
-2. Put your OpenAI API key in `.env` as `OPENAI_API_KEY=...`.
-3. Run `.\start-backend.ps1`.
-4. In Settings, keep the AI backend URL as `http://127.0.0.1:8787` and use Check AI.
+2. **Option A — OpenAI:** set `OPENAI_API_KEY=...`.
+3. **Option B — OpenRouter (e.g. Gemini 2.5 Flash):** set `OPENROUTER_API_KEY=sk-or-v1-...` and optionally `OPENROUTER_MODEL=google/gemini-2.5-flash`. If both `OPENROUTER_API_KEY` and `OPENAI_API_KEY` exist, the backend uses OpenRouter unless you set `AUTOSPEND_LLM_PROVIDER=openai`.
+4. Run `.\start-backend.ps1` or `.\start-autospend.ps1`.
+5. In Settings, keep the AI backend URL as `http://127.0.0.1:8787` and use **Check AI**.
 
-The API key is read only by the local backend. It is not stored in browser `localStorage` or committed into source code.
+API keys are read only by the local backend, not by the browser.
 
 ## Google Drive integration
 

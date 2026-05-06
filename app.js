@@ -532,6 +532,15 @@ function renderReview() {
   els.reviewList.innerHTML = items.length ? "" : `<div class="empty-state">No pending review items.</div>`;
   items.forEach((tx) => {
     const dupes = duplicatesFor(tx).filter((candidate) => candidate.id !== tx.id && candidate.status === "saved");
+    const ai = tx.aiAnalysis;
+    const aiHtml =
+      ai && (ai.insights || (ai.suggestions && ai.suggestions.length))
+        ? `<div class="review-ai"><p class="review-ai-head">AI insights</p><p class="review-ai-text">${escapeHtml(ai.insights || "")}</p>${
+            ai.suggestions?.length
+              ? `<ul class="review-ai-list">${ai.suggestions.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul>`
+              : ""
+          }</div>`
+        : "";
     const card = document.createElement("article");
     card.className = "review-card";
     card.innerHTML = `
@@ -541,6 +550,7 @@ function renderReview() {
           <h3>${escapeHtml(tx.merchant)} | ${money(tx.amount)}</h3>
           <p>${formatDate(tx.date)} | ${escapeHtml(tx.category)} | ${escapeHtml(tx.method)} | ${label(tx.sourceType)}</p>
           <p>Confidence ${Math.round(tx.confidence * 100)}%${dupes.length ? ` | Possible duplicate: ${escapeHtml(dupes[0].merchant)} ${money(dupes[0].amount)}` : ""}</p>
+          ${aiHtml}
         </div>
         <div class="review-actions">
           <button class="secondary-button" data-review="approve" data-id="${tx.id}" type="button">Approve</button>
@@ -644,8 +654,14 @@ function resetForm() {
 }
 
 function formTransaction() {
-  return asTx({
-    id: els.editingId.value || id("tx"),
+  let preserveAi = null;
+  const editId = els.editingId.value;
+  if (editId) {
+    const existing = state.transactions.find((t) => t.id === editId);
+    if (existing?.aiAnalysis) preserveAi = existing.aiAnalysis;
+  }
+  const tx = asTx({
+    id: editId || id("tx"),
     type: selectedType(),
     amount: Number(els.amountInput.value),
     date: els.dateInput.value,
@@ -657,10 +673,13 @@ function formTransaction() {
     confidence: 1,
     status: "saved"
   });
+  if (preserveAi) tx.aiAnalysis = preserveAi;
+  return tx;
 }
 
-function saveTransaction(event) {
+async function saveTransaction(event) {
   event.preventDefault();
+  const wasEditing = Boolean(els.editingId.value);
   const tx = formTransaction();
   if (!Number.isFinite(tx.amount) || tx.amount <= 0) return toast("Enter a valid amount.");
   if (!els.editingId.value && duplicatesFor(tx).some((item) => item.status === "saved")) {
@@ -673,6 +692,7 @@ function saveTransaction(event) {
   upsert(tx);
   resetForm();
   renderAll();
+  if (wasEditing) await notifyLedgerCorrection(tx);
 }
 
 function editTransaction(txId) {
@@ -863,6 +883,7 @@ function normalizeBackendTx(raw, sourceType, fallbackNote) {
   const confidence = Number.isFinite(Number(raw?.confidence)) ? Number(raw.confidence) : 0.75;
   const date = /^\d{4}-\d{2}-\d{2}$/.test(raw?.date || "") ? raw.date : todayIso();
   return asTx({
+    id: raw?.id,
     type: txType,
     amount: Number(raw?.amount) || 0,
     currency: raw?.currency || state.settings.currency,
@@ -877,6 +898,39 @@ function normalizeBackendTx(raw, sourceType, fallbackNote) {
   });
 }
 
+/** Normalizes the strict `{ category, total, insights, suggestions[] }` analysis envelope from `/api/parse-*`. */
+function normalizeAnalysis(envelope) {
+  if (!envelope || typeof envelope !== "object") return null;
+  const suggestions = Array.isArray(envelope.suggestions)
+    ? envelope.suggestions.map((s) => String(s).trim()).filter(Boolean).slice(0, 8)
+    : [];
+  return {
+    category: String(envelope.category || ""),
+    total: String(envelope.total || ""),
+    insights: String(envelope.insights || ""),
+    suggestions
+  };
+}
+
+function attachAiAnalysis(tx, envelope) {
+  const a = normalizeAnalysis(envelope);
+  if (a) tx.aiAnalysis = a;
+  return tx;
+}
+
+async function notifyLedgerCorrection(tx) {
+  if (!tx?.id) return;
+  try {
+    await backendPost("/api/transaction/correct", {
+      id: tx.id,
+      transaction: tx,
+      analysis: tx.aiAnalysis || {}
+    });
+  } catch (err) {
+    console.warn("Ledger correction sync skipped.", err);
+  }
+}
+
 async function parseSmartText(text, sourceType) {
   try {
     const data = await backendPost("/api/parse-text", {
@@ -884,7 +938,7 @@ async function parseSmartText(text, sourceType) {
       currency: state.settings.currency,
       today: todayIso()
     });
-    return normalizeBackendTx(data.transaction, sourceType, text);
+    return attachAiAnalysis(normalizeBackendTx(data.transaction, sourceType, text), data.analysis);
   } catch (error) {
     console.warn("AI text parser unavailable; using local parser.", error);
     return parseEntry(text, sourceType);
@@ -941,7 +995,7 @@ async function parseSmartImage(file, textHint) {
         currency: state.settings.currency,
         today: todayIso()
       });
-      return normalizeBackendTx(data.transaction, "receipt_upload", textHint || file.name);
+      return attachAiAnalysis(normalizeBackendTx(data.transaction, "receipt_upload", textHint || file.name), data.analysis);
     }
     if (mimeType.startsWith("image/")) {
       const dataUrl = await fileToDataUrlMaybeCompress(file);
@@ -953,14 +1007,14 @@ async function parseSmartImage(file, textHint) {
         currency: state.settings.currency,
         today: todayIso()
       });
-      return normalizeBackendTx(data.transaction, "receipt_upload", textHint || file.name);
+      return attachAiAnalysis(normalizeBackendTx(data.transaction, "receipt_upload", textHint || file.name), data.analysis);
     }
     const data = await backendPost("/api/parse-text", {
       text: `Filename: ${file.name}\nVisible text hint: ${textHint}`,
       currency: state.settings.currency,
       today: todayIso()
     });
-    return normalizeBackendTx(data.transaction, "receipt_upload", textHint || file.name);
+    return attachAiAnalysis(normalizeBackendTx(data.transaction, "receipt_upload", textHint || file.name), data.analysis);
   } catch (error) {
     console.warn("AI image parser unavailable; using local parser.", error);
     return parseEntry(textHint || file.name.replace(/[_.-]/g, " "), "receipt_upload");
@@ -995,18 +1049,31 @@ async function handleUpload(event) {
   if (file.size > MAX_UPLOAD_BYTES) {
     return toast("File is too large (max 12 MB). Try a smaller photo or export a JPEG.");
   }
-  const rawText = els.uploadText.value.trim();
-  const queueItem = { id: id("file"), name: file.name, sourceType: file.type === "application/pdf" ? "drive_receipt" : "receipt_upload", status: "processing", createdAt: new Date().toISOString() };
-  state.queue.push(queueItem);
-  const tx = await parseSmartImage(file, rawText);
-  tx.sourceFileId = queueItem.id;
-  tx.confidence = Math.min(tx.confidence, rawText ? 0.9 : 0.78);
-  tx.status = "needs_review";
-  createReview(tx, queueItem);
-  els.uploadForm.reset();
-  persist();
-  renderAll();
-  toast("Upload added to review.");
+  const submitBtn = els.uploadForm.querySelector('button[type="submit"]');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.dataset.originalText = submitBtn.textContent;
+    submitBtn.textContent = "Uploading...";
+  }
+  try {
+    const rawText = els.uploadText.value.trim();
+    const queueItem = { id: id("file"), name: file.name, sourceType: file.type === "application/pdf" ? "drive_receipt" : "receipt_upload", status: "processing", createdAt: new Date().toISOString() };
+    state.queue.push(queueItem);
+    const tx = await parseSmartImage(file, rawText);
+    tx.sourceFileId = queueItem.id;
+    tx.confidence = Math.min(tx.confidence, rawText ? 0.9 : 0.78);
+    tx.status = "needs_review";
+    createReview(tx, queueItem);
+    els.uploadForm.reset();
+    persist();
+    renderAll();
+    toast("Upload added to review.");
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = submitBtn.dataset.originalText;
+    }
+  }
 }
 
 async function connectDrive() {
@@ -1037,6 +1104,9 @@ async function disconnectDrive() {
 async function scanDrive() {
   const folderName = els.driveFolderInput.value.trim() || state.settings.driveFolderName;
   if (state.settings.driveConnected) {
+    els.scanDriveBtn.disabled = true;
+    const originalText = els.scanDriveBtn.textContent;
+    els.scanDriveBtn.textContent = "Scanning...";
     try {
       const data = await backendPost("/api/drive/scan", {
         folderName,
@@ -1050,11 +1120,13 @@ async function scanDrive() {
           name: item.name,
           sourceType: "drive_screenshot",
           status: "processing",
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          driveFileId: item.fileId
         };
         state.queue.push(queueItem);
-        const tx = normalizeBackendTx(item.transaction, "drive_screenshot", item.name);
+        const tx = attachAiAnalysis(normalizeBackendTx(item.transaction, "drive_screenshot", item.name), item.analysis);
         tx.sourceFileId = queueItem.id;
+        tx.driveFileId = item.fileId;
         createReview(tx, queueItem);
       });
       persist();
@@ -1062,6 +1134,9 @@ async function scanDrive() {
       toast(files.length ? `Imported ${files.length} file(s) from Drive.` : "No new Drive files found.");
     } catch (error) {
       toast(error.message || "Drive scan failed.");
+    } finally {
+      els.scanDriveBtn.disabled = false;
+      els.scanDriveBtn.textContent = originalText;
     }
     return;
   }
@@ -1079,6 +1154,7 @@ function reviewAction(action, txId) {
     tx.status = "saved";
     tx.confidence = Math.max(tx.confidence, 0.9);
     toast(action === "keep" ? "Kept as a separate transaction." : "Review item approved.");
+    notifyLedgerCorrection(tx);
   }
   persist();
   renderAll();
@@ -1089,6 +1165,15 @@ async function askAssistant(event) {
   const question = els.assistantInput.value.trim();
   if (!question) return;
   state.chat.push({ from: "user", text: question });
+  
+  els.assistantInput.disabled = true;
+  const submitBtn = els.assistantForm.querySelector('button[type="submit"]');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.dataset.originalText = submitBtn.textContent;
+    submitBtn.textContent = "...";
+  }
+
   let reply = "";
   try {
     const data = await backendPost("/api/assistant", {
@@ -1103,7 +1188,14 @@ async function askAssistant(event) {
   } catch (error) {
     console.warn("AI assistant unavailable; using local assistant.", error);
     reply = answer(question);
+  } finally {
+    els.assistantInput.disabled = false;
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = submitBtn.dataset.originalText;
+    }
   }
+  
   state.chat.push({ from: "assistant", text: reply });
   els.assistantInput.value = "";
   persist();
