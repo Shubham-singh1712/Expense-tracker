@@ -33,10 +33,23 @@ _oauth_lock = threading.Lock()
 _oauth_pending: dict[str, tuple[str, float]] = {}
 OAUTH_STATE_TTL_SEC = 600
 MAX_BODY_BYTES = 16 * 1024 * 1024
+FIGMA_DIST = ROOT / "FIGMA" / "dist"
 STATIC_FILES: dict[str, Path] = {
     "/index.html": ROOT / "index.html",
     "/styles.css": ROOT / "styles.css",
     "/app.js": ROOT / "app.js",
+}
+MIME_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".ico": "image/x-icon",
 }
 DRIVE_TOKEN_PATH = ROOT / ".drive_tokens.json"
 DRIVE_STATE_PATH = ROOT / ".drive_state.json"
@@ -420,18 +433,19 @@ def oauth_callback_response(message: str, success: bool = True, auth_type: str =
     message_js = json.dumps(message)
     status_text = "success" if success else "error"
     type_text = "autospend-drive-auth" if auth_type == "drive" else "autospend-user-auth"
-    target_origin = json.dumps(app_origin())
     html = f"""
 <html>
   <head><meta charset=\"utf-8\"></head>
   <body>
     <script>
       if (window.opener) {{
-        window.opener.postMessage({{type: '{type_text}', status: '{status_text}', message: {message_js}}}, {target_origin});
+        window.opener.postMessage({{type: '{type_text}', status: '{status_text}', message: {message_js}}}, '*');
       }}
       document.title = 'Authorization complete';
+      setTimeout(() => window.close(), 100);
     </script>
     <p>{message}</p>
+    <p>You can close this window.</p>
   </body>
 </html>
 """
@@ -457,25 +471,37 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             self.json_response({"error": "Not found"}, status=404)
             return
-        mime = "application/octet-stream"
-        if file_path.suffix.lower() == ".html":
-            mime = "text/html; charset=utf-8"
-        elif file_path.suffix.lower() == ".css":
-            mime = "text/css; charset=utf-8"
-        elif file_path.suffix.lower() == ".js":
-            mime = "application/javascript; charset=utf-8"
+        mime = MIME_TYPES.get(file_path.suffix.lower(), "application/octet-stream")
         self.send_response(200)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
+    def figma_static_path(self, req_path: str) -> Path | None:
+        if not FIGMA_DIST.exists():
+            return None
+        relative = urllib.parse.unquote(req_path).lstrip("/")
+        candidate = (FIGMA_DIST / relative).resolve()
+        try:
+            candidate.relative_to(FIGMA_DIST.resolve())
+        except ValueError:
+            return None
+        return candidate if candidate.is_file() else None
+
+    def serve_app_index(self) -> None:
+        figma_index = FIGMA_DIST / "index.html"
+        if figma_index.exists():
+            self.serve_static(figma_index)
+            return
+        self.serve_static(ROOT / "index.html")
+
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
         req_path = parsed.path
         route = req_path.rstrip("/") or "/"
-        if route == "/":
-            self.serve_static(ROOT / "index.html")
+        if route in {"/", "/index.html"}:
+            self.serve_app_index()
             return
         if route == "/api/health":
             global _db_conn
@@ -522,6 +548,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/oauth2callback":
             self.handle_oauth2_callback(parsed.query)
+            return
+        figma_asset = self.figma_static_path(req_path)
+        if figma_asset:
+            self.serve_static(figma_asset)
+            return
+        if not path.startswith("/api/"):
+            self.serve_app_index()
             return
         self.json_response({"error": "Not found"}, status=404)
 

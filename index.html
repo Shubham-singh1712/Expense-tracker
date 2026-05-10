@@ -5,85 +5,259 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>AutoSpend AI</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   </head>
-  <body>
-    <div class="app-shell">
-      <header class="topbar">
-        <div>
-          <p class="eyebrow">Local-first finance workspace</p>
-          <h1>AutoSpend AI</h1>
-        </div>
-        <div class="topbar-actions">
-          <button class="icon-button" id="exportCsvBtn" type="button" title="Export CSV" aria-label="Export CSV">CSV</button>
-          <button class="icon-button" id="exportJsonBtn" type="button" title="Export JSON" aria-label="Export JSON">JSN</button>
-          <button class="icon-button" id="printBtn" type="button" title="Print report" aria-label="Print report">PRT</button>
-        </div>
-      </header>
+  <body class="dark-theme">
+    <div class="glow-bg"></div>
 
-      <nav class="tabs" aria-label="Views">
-        <button class="tab-button active" type="button" data-view="overview">Overview</button>
-        <button class="tab-button" type="button" data-view="transactions">Transactions</button>
-        <button class="tab-button" type="button" data-view="intake">Intake</button>
-        <button class="tab-button" type="button" data-view="review">Review</button>
-        <button class="tab-button" type="button" data-view="reports">Reports</button>
-        <button class="tab-button" type="button" data-view="assistant">Assistant</button>
-        <button class="tab-button" type="button" data-view="settings">Settings</button>
-      </nav>
+    <div id="loginScreen" class="login-wall">
+      <div class="login-split">
+        <div class="login-left">
+          <div class="login-left-content">
+            <div class="brand large-brand">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: #fff; background: #6366f1; border-radius: 8px; padding: 4px;"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path></svg>
+              <span>AutoSpend AI</span>
+            </div>
+            
+            <h1 class="login-heading">Your money,<br><span class="text-gradient">intelligently<br>managed</span></h1>
+            <p class="login-desc">Upload receipts, track expenses, and let AI uncover patterns in your spending — all in one sleek dashboard.</p>
+            
+            <div class="login-stats">
+              <div>
+                <strong>2.4M+</strong>
+                <span>transactions<br>analyzed</span>
+              </div>
+              <div>
+                <strong>$340</strong>
+                <span>avg saved<br>per user/yr</span>
+              </div>
+              <div>
+                <strong>98%</strong>
+                <span>AI extraction<br>accuracy</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="login-right">
+          <div class="login-form-container">
+            <h2 id="authTitle">Welcome back</h2>
+            <p id="authSubtitle" class="auth-subtitle">Sign in to your financial intelligence dashboard</p>
+            
+            <button class="google-auth-btn" type="button" id="googleLoginBtn">
+              <svg viewBox="0 0 24 24" width="20" height="20"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+              Continue with Google
+            </button>
+            
+            <div class="divider">
+              <span>or sign in with email</span>
+            </div>
+            
+            <form id="localAuthForm" class="local-auth-form">
+              <input type="email" id="authEmail" placeholder="Email address" required>
+              <input type="password" id="authPassword" placeholder="Password" required>
+              <button class="primary-button submit-auth" type="submit" id="authSubmitBtn">Sign in</button>
+            </form>
+            
+            <p class="auth-switch">Don't have an account? <a href="#" id="switchAuthMode">Sign up free</a></p>
+          </div>
+        </div>
+      </div>
+    </div>
 
-      <main>
+    <div id="appContent" class="layout-wrapper hidden">
+      <aside class="sidebar">
+        <div class="brand">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--brand);"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
+          <span>AutoSpend AI</span>
+        </div>
+        <nav class="tabs" aria-label="Views">
+          <button class="tab-button active" type="button" data-view="overview" title="Dashboard">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="8" rx="1.5"></rect><rect x="14" y="3" width="7" height="5" rx="1.5"></rect><rect x="14" y="12" width="7" height="9" rx="1.5"></rect><rect x="3" y="15" width="7" height="6" rx="1.5"></rect></svg>
+            <span class="tab-label">Dashboard</span>
+          </button>
+          <button class="tab-button" type="button" data-view="transactions" title="Transactions">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7h11"></path><path d="M8 12h11"></path><path d="M8 17h11"></path><path d="M4 7h.01"></path><path d="M4 12h.01"></path><path d="M4 17h.01"></path></svg>
+            <span class="tab-label">Transactions</span>
+          </button>
+          <button class="tab-button" type="button" data-view="intake" title="Data Intake">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
+            <span class="tab-label">Data Intake</span>
+          </button>
+          <button class="tab-button" type="button" data-view="review" title="AI Review">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.6 4.7L18 10l-4.4 2.3L12 17l-1.6-4.7L6 10l4.4-2.3L12 3z"></path><path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8L19 16z"></path></svg>
+            <span class="tab-label">AI Review</span>
+            <span class="badge" id="sidebarReviewBadge">0</span>
+          </button>
+          <button class="tab-button" type="button" data-view="drive" title="Drive Sync">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3 2 17.5 5.8 21h12.4L22 17.5 13.5 3h-3z"></path><path d="M8 17.5h8"></path></svg>
+            <span class="tab-label">Drive Sync</span>
+          </button>
+          <button class="tab-button" type="button" data-view="reports" title="Reports">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5"></path><path d="M4 19h16"></path><rect x="7" y="11" width="3" height="5" rx="1"></rect><rect x="12" y="7" width="3" height="9" rx="1"></rect><rect x="17" y="13" width="3" height="3" rx="1"></rect></svg>
+            <span class="tab-label">Reports</span>
+          </button>
+          <button class="tab-button" type="button" data-view="assistant" title="AI Assistant">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6V3"></path><path d="M8 21h8"></path><rect x="5" y="6" width="14" height="12" rx="4"></rect><path d="M9 11h.01"></path><path d="M15 11h.01"></path><path d="M9 15h6"></path></svg>
+            <span class="tab-label">AI Assistant</span>
+          </button>
+          <div class="sidebar-spacer"></div>
+          <button class="tab-button" type="button" data-view="settings" title="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"></path><path d="M19.4 15a1.8 1.8 0 0 0 .4 2l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.8 1.8 0 0 0-2-.4 1.8 1.8 0 0 0-1 1.6V21a2 2 0 0 1-4 0v-.1a1.8 1.8 0 0 0-1-1.6 1.8 1.8 0 0 0-2 .4l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1a1.8 1.8 0 0 0 .4-2 1.8 1.8 0 0 0-1.6-1H3a2 2 0 0 1 0-4h.1a1.8 1.8 0 0 0 1.6-1 1.8 1.8 0 0 0-.4-2l-.1-.1a2 2 0 0 1 2.8-2.8l.1.1a1.8 1.8 0 0 0 2 .4 1.8 1.8 0 0 0 1-1.6V3a2 2 0 0 1 4 0v.1a1.8 1.8 0 0 0 1 1.6 1.8 1.8 0 0 0 2-.4l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1.8 1.8 0 0 0-.4 2 1.8 1.8 0 0 0 1.6 1h.1a2 2 0 0 1 0 4h-.1a1.8 1.8 0 0 0-1.6 1z"></path></svg>
+            <span class="tab-label">Settings</span>
+          </button>
+        </nav>
+        
+        <div class="sidebar-profile">
+          <div class="profile-avatar">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+          </div>
+          <div class="profile-info">
+            <span class="profile-name" id="sidebarProfileName">User</span>
+            <span class="profile-email" id="sidebarProfileEmail">user@example.com</span>
+          </div>
+          <div class="sidebar-profile-actions">
+            <button class="icon-button" id="sidebarLogoutBtn" title="Sign out" style="color: var(--expense);">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+            </button>
+            <button class="icon-button" id="sidebarCollapseBtn" title="Collapse Sidebar">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main-content">
         <section class="view active" id="overviewView">
-          <section class="summary-grid" aria-label="Financial summary">
-            <article class="metric income"><span>Total income</span><strong id="totalIncome">INR 0</strong></article>
-            <article class="metric expense"><span>Total expense</span><strong id="totalExpense">INR 0</strong></article>
-            <article class="metric balance"><span>Balance</span><strong id="balanceAmount">INR 0</strong></article>
-            <article class="metric budget"><span>Monthly budget used</span><strong id="budgetUsed">0%</strong></article>
-            <article class="metric inbox"><span>Needs review</span><strong id="reviewMetric">0</strong></article>
-            <article class="metric drive"><span>Drive intake</span><strong id="driveMetric">Off</strong></article>
+          <header class="dash-topbar">
+            <div class="dash-search">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: #667085"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <input type="text" placeholder="Search..." onfocus="document.querySelector('[data-view=\'transactions\']').click()">
+            </div>
+            <div class="dash-actions">
+              <button class="icon-button" style="border-radius: 50%;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg></button>
+              <button class="primary-button" onclick="document.querySelector('[data-view=\'intake\']').click()" style="border-radius: 20px;">+ Add Expense</button>
+            </div>
+          </header>
+
+
+          <div class="dash-header" style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
+            <div>
+              <p style="display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.04); padding: 4px 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.18em; color: var(--brand); margin-bottom: 8px;">✦ Live backend</p>
+              <h1 class="screen-title" style="margin-bottom: 4px;">Good morning, <span id="dashProfileName">User</span></h1>
+              <p style="color: var(--text-muted); font-size: 0.875rem; line-height: 1.5; margin-top: 4px;">Financial overview • <span id="dashMonthLabel">May 2026</span></p>
+            </div>
+          </div>
+
+          <section class="summary-grid dash-4-col" aria-label="Financial summary">
+            <article class="metric glass-card">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <span>Spent This Month</span>
+                <div class="card-icon icon-cyan"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></div>
+              </div>
+              <div>
+                <strong id="dashTotalExpense" class="mono" style="font-size: 2rem;">$0</strong>
+                <p id="dashExpenseTrend" style="margin: 8px 0 0; font-size: 0.85rem; font-weight: 600; color: var(--expense);">+0% vs last month</p>
+              </div>
+            </article>
+
+            <article class="metric glass-card">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <span>Daily Average</span>
+                <div class="card-icon icon-emerald"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg></div>
+              </div>
+              <div>
+                <strong id="dashDailyAvg" class="mono" style="font-size: 2rem;">$0</strong>
+                <p id="dashDailyTrend" style="margin: 8px 0 0; font-size: 0.85rem; font-weight: 600; color: var(--income);">-0% vs last week</p>
+              </div>
+            </article>
+
+            <article class="metric glass-card">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <span>Top Category</span>
+                <div class="card-icon icon-violet"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg></div>
+              </div>
+              <div>
+                <strong id="dashTopCat" style="font-size: 1.8rem; letter-spacing: -0.02em;">None</strong>
+                <p id="dashTopCatDesc" style="margin: 8px 0 0; font-size: 0.85rem; color: var(--text-muted);">$0 - 0% of total</p>
+              </div>
+            </article>
+
+            <article class="metric glass-card">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <span>AI Score</span>
+                <div class="card-icon icon-emerald"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path></svg></div>
+              </div>
+              <div>
+                <strong id="dashAiScore" class="mono" style="font-size: 2rem;">--/100</strong>
+                <p id="dashAiScoreDesc" style="margin: 8px 0 0; font-size: 0.85rem; color: var(--text-muted);">Good spending control</p>
+              </div>
+            </article>
           </section>
 
-          <div class="layout-grid">
-            <section class="tool-panel transaction-panel">
-              <div class="panel-heading">
-                <h2 id="formTitle">Add transaction</h2>
-                <button class="ghost-button hidden" id="cancelEditBtn" type="button">Cancel edit</button>
-              </div>
-              <form id="transactionForm" autocomplete="off">
-                <input type="hidden" id="editingId">
-                <fieldset class="segmented-control compact">
-                  <legend>Type</legend>
-                  <label><input type="radio" name="type" value="income"><span>Income</span></label>
-                  <label><input type="radio" name="type" value="expense" checked><span>Expense</span></label>
-                </fieldset>
-                <div class="form-grid">
-                  <label><span>Amount</span><input id="amountInput" type="number" min="1" step="0.01" required></label>
-                  <label><span>Date</span><input id="dateInput" type="date" required></label>
-                  <label><span>Merchant</span><input id="merchantInput" type="text" maxlength="60" placeholder="Swiggy, salary, rent"></label>
-                  <label><span>Category</span><select id="categoryInput" required></select></label>
-                  <label><span>Payment mode</span><select id="methodInput"></select></label>
-                  <label><span>Source</span><select id="sourceInput"></select></label>
+          <div class="layout-grid overview-grid">
+            <section class="tool-panel chart-panel glass-card">
+              <div class="panel-heading" style="margin-bottom: 8px;">
+                <div>
+                  <h2 style="font-size: 1.2rem;">Spending Trend</h2>
+                  <p style="color: var(--text-muted); font-size: 0.85rem;" id="dashChartRange">Nov 2025 — May 2026</p>
                 </div>
-                <label><span>Note</span><input id="noteInput" type="text" maxlength="120" placeholder="Optional reference"></label>
-                <button class="primary-button" type="submit" id="saveTransactionBtn">Save transaction</button>
-                <div class="inline-warning hidden" id="duplicateWarning"></div>
-              </form>
-            </section>
-
-            <section class="tool-panel chart-panel">
-              <div class="panel-heading"><h2>Spending by category</h2><span id="categoryChartTotal" class="panel-value">INR 0</span></div>
-              <div class="chart-box"><canvas id="categoryChart" width="520" height="320" aria-label="Expense category chart"></canvas></div>
-              <div class="legend-list" id="categoryLegend"></div>
-            </section>
-
-            <section class="tool-panel chart-panel wide">
-              <div class="panel-heading"><h2>Monthly income vs expense</h2><span class="panel-value" id="savingsRate">0% saved</span></div>
+                <span class="status-pill" style="background: rgba(255,255,255,0.05); color: var(--text-muted);">Monthly</span>
+              </div>
               <div class="chart-box bar"><canvas id="monthlyChart" width="920" height="300" aria-label="Monthly income and expense chart"></canvas></div>
+            </section>
+            
+            <section class="tool-panel chart-panel category-panel glass-card">
+              <div class="panel-heading" style="margin-bottom: 8px;">
+                <div>
+                  <h2 style="font-size: 1.2rem;">By Category</h2>
+                  <p style="color: var(--text-muted); font-size: 0.85rem;" id="dashCatRange">May 2026</p>
+                </div>
+              </div>
+              <div class="chart-box category-chart-box"><canvas id="categoryChart" width="260" height="170" aria-label="Expense category chart"></canvas></div>
+              <div class="legend-list" id="categoryLegend" style="gap: 12px; border-top: none;"></div>
+              
+              <!-- Hidden old inputs for backwards compatibility -->
+              <div style="display: none;">
+                <span id="categoryChartTotal"></span>
+                <span id="savingsRate"></span>
+                <span id="totalIncome"></span><span id="totalExpense"></span><span id="balanceAmount"></span><span id="budgetUsed"></span><span id="reviewMetric"></span><span id="driveMetric"></span>
+              </div>
+            </section>
+          </div>
+
+          <div class="layout-grid overview-grid dashboard-bottom-grid">
+            <section class="tool-panel glass-card dashboard-list-card">
+              <div class="panel-heading">
+                <h2>Recent Transactions</h2>
+                <button class="link-button" type="button" onclick="document.querySelector('[data-view=\'transactions\']').click()">View all</button>
+              </div>
+              <div class="dashboard-activity-list" id="dashboardRecentList"></div>
+            </section>
+            <section class="tool-panel glass-card dashboard-insights-card">
+              <div class="panel-heading">
+                <h2>AI Insights</h2>
+              </div>
+              <div class="dashboard-insights-list" id="dashboardInsightsList"></div>
             </section>
           </div>
         </section>
 
         <section class="view" id="transactionsView">
-          <section class="tool-panel">
-            <div class="panel-heading"><h2>Transactions</h2><span class="panel-value" id="transactionCount">0 records</span></div>
+          <div class="dash-header" style="margin-top: 24px;">
+            <div>
+              <h1 class="login-heading" style="font-size: 2.2rem; margin-bottom: 4px;">History</h1>
+              <p style="color: var(--text-muted); font-size: 0.95rem;">Manage your ledger</p>
+            </div>
+            <div class="topbar-actions">
+              <button class="icon-button" id="exportCsvBtn" type="button" title="Export CSV">CSV</button>
+              <button class="icon-button" id="exportJsonBtn" type="button" title="Export JSON">JSN</button>
+            </div>
+          </div>
+          <section class="tool-panel glass-card">
+            <div class="panel-heading"><h2>Transactions</h2><span class="panel-value mono" id="transactionCount">0 records</span></div>
             <div class="filter-grid">
               <label><span>Search</span><input id="searchInput" type="search" placeholder="Merchant, category, note"></label>
               <label><span>Type</span><select id="typeFilter"><option value="all">All</option><option value="income">Income</option><option value="expense">Expense</option></select></label>
@@ -97,79 +271,198 @@
         </section>
 
         <section class="view" id="intakeView">
+          <div class="dash-header" style="margin-top: 24px;">
+            <div>
+              <h1 class="login-heading" style="font-size: 2.2rem; margin-bottom: 4px;">Data Intake</h1>
+              <p style="color: var(--text-muted); font-size: 0.95rem;">Upload and parse files</p>
+            </div>
+          </div>
           <div class="intake-grid">
-            <section class="tool-panel">
-              <div class="panel-heading"><h2>Cash quick entry</h2><span class="panel-value">Text parser</span></div>
+            <section class="tool-panel glass-card transaction-panel intake-manual-card">
+              <div class="panel-heading">
+                <h2 id="formTitle">Add transaction</h2>
+                <button class="ghost-button hidden" id="cancelEditBtn" type="button">Cancel edit</button>
+              </div>
+              <form id="transactionForm" autocomplete="off">
+                <input type="hidden" id="editingId">
+                <fieldset class="segmented-control compact">
+                  <legend>Type</legend>
+                  <label><input type="radio" name="type" value="income"><span>Income</span></label>
+                  <label><input type="radio" name="type" value="expense" checked><span>Expense</span></label>
+                </fieldset>
+                <div class="form-grid">
+                  <label><span>Amount</span><input id="amountInput" type="number" min="1" step="0.01" class="mono" required></label>
+                  <label><span>Date</span><input id="dateInput" type="date" required></label>
+                  <label><span>Merchant</span><input id="merchantInput" type="text" maxlength="60" placeholder="Swiggy, salary, rent"></label>
+                  <label><span>Category</span><select id="categoryInput" required></select></label>
+                  <label><span>Payment Mode</span><select id="methodInput"></select></label>
+                  <label><span>Source</span><select id="sourceInput"></select></label>
+                </div>
+                <label><span>Note</span><input id="noteInput" type="text" maxlength="120" placeholder="Optional reference"></label>
+                <button class="primary-button" type="submit" id="saveTransactionBtn">Save transaction</button>
+                <div class="inline-warning hidden" id="duplicateWarning"></div>
+              </form>
+            </section>
+            
+            <section class="tool-panel glass-card intake-upload-card">
+              <div class="panel-heading"><h2>Receipt or Screenshot</h2><span class="panel-value">Image/PDF intake</span></div>
+              <form id="uploadForm" class="stack-form">
+                <label><span>Files</span><input id="uploadInput" type="file" accept="image/*,.pdf" multiple></label>
+                <p class="field-hint">Select multiple images (JPEG/PNG) or PDFs to parse them simultaneously.</p>
+                <label><span>Known text (Optional)</span><textarea id="uploadText" rows="2" placeholder="Visible amount, merchant, etc"></textarea></label>
+                <button class="primary-button" type="submit">Create review items</button>
+              </form>
+            </section>
+            
+            <section class="tool-panel glass-card intake-quick-card">
+              <div class="panel-heading"><h2>Cash Quick Entry</h2><span class="panel-value">Text parser</span></div>
               <form id="quickEntryForm" class="stack-form">
-                <label><span>Entry text</span><textarea id="quickEntryText" rows="4" placeholder="Paid 420 to Swiggy by UPI for food today"></textarea></label>
+                <label><span>Entry text</span><textarea id="quickEntryText" rows="3" placeholder="Paid 420 to Swiggy by UPI for food today"></textarea></label>
                 <button class="primary-button" type="submit">Parse and review</button>
               </form>
             </section>
-            <section class="tool-panel">
-              <div class="panel-heading"><h2>Receipt or screenshot</h2><span class="panel-value">Image/PDF intake</span></div>
-              <form id="uploadForm" class="stack-form">
-                <label><span>File</span><input id="uploadInput" type="file" accept="image/*,.pdf"></label>
-                <p class="field-hint">Images up to 12 MB (JPEG/PNG/WebP). PDFs use your hint text and filename unless you add visible details below.</p>
-                <label><span>Known text</span><textarea id="uploadText" rows="3" placeholder="Optional visible amount, merchant, date, method"></textarea></label>
-                <button class="primary-button" type="submit">Create review item</button>
-              </form>
-            </section>
-            <section class="tool-panel">
-              <div class="panel-heading"><h2>Google Drive</h2><span class="status-dot" id="driveStatus">Not connected</span></div>
-              <div class="drive-actions">
-                <label><span>Folder name</span><input id="driveFolderInput" type="text" placeholder="Expense Screenshots"></label>
-                <button class="secondary-button" id="connectDriveBtn" type="button">Connect Drive</button>
-                <button class="secondary-button" id="scanDriveBtn" type="button">Scan folder</button>
-                <button class="ghost-button" id="disconnectDriveBtn" type="button">Disconnect</button>
+          </div>
+        </section>
+
+        <section class="view" id="driveView">
+          <div class="dash-header" style="margin-top: 24px;">
+            <div>
+              <h1 class="login-heading" style="font-size: 2.2rem; margin-bottom: 4px;">Drive Sync</h1>
+              <p style="color: var(--text-muted); font-size: 0.95rem;">Connect and manage your Google Drive auto-scan</p>
+            </div>
+            <div class="topbar-actions">
+              <button class="icon-button" style="border-radius: 50%;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg></button>
+            </div>
+          </div>
+          
+          <div style="max-width: 800px; display: grid; gap: 24px;">
+            <section class="tool-panel glass-card" style="display: flex; justify-content: space-between; align-items: center;">
+              <div style="display: flex; gap: 16px; align-items: center;">
+                <div style="background: #fff; border-radius: 50%; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;">
+                  <svg width="24" height="24" viewBox="0 0 24 24"><path fill="#4285F4" d="M19.18 10.96l-3.32-5.75H9.21l3.32 5.75h6.65z"/><path fill="#34A853" d="M6.65 15.28L3.33 9.53 0 15.28h6.65z"/><path fill="#FBBC05" d="M13.3 21.03l3.32-5.75H3.33l3.32 5.75h6.65z"/><path fill="#EA4335" d="M15.86 5.21L12.53-.54H5.88l3.33 5.75h6.65z"/></svg>
+                </div>
+                <div>
+                  <h2 style="margin-bottom: 4px;">Google Drive</h2>
+                  <p id="driveStatusText" style="color: var(--income); font-size: 0.85rem; font-weight: 600;">Not connected</p>
+                </div>
+              </div>
+              <div style="display: flex; gap: 12px; align-items: center;">
+                <button class="secondary-button" id="connectDriveBtn" type="button">Connect</button>
+                <button class="ghost-button danger-text" id="disconnectDriveBtn" type="button" style="display: none;">Disconnect</button>
+                <span class="status-pill saved" id="driveStatus" style="display: none; background: rgba(16,185,129,0.1); color: var(--income);">✦ Active</span>
               </div>
             </section>
-            <section class="tool-panel">
-              <div class="panel-heading"><h2>Processing queue</h2><span class="panel-value" id="queueCount">0 files</span></div>
-              <div class="queue-list" id="queueList"></div>
+            
+            <section class="tool-panel glass-card">
+              <div class="panel-heading"><h2>Folders to Scan</h2></div>
+              <div class="stack-form" style="gap: 20px;">
+                <label class="checkbox-row" style="font-size: 1rem;"><input type="checkbox" checked> <span>📁 Receipts & Bills</span></label>
+                <label class="checkbox-row" style="font-size: 1rem;"><input type="checkbox" checked> <span>📁 Bank Statements</span></label>
+                <label class="checkbox-row" style="font-size: 1rem;"><input type="checkbox" checked> <span>📁 Screenshots</span></label>
+                <label class="checkbox-row" style="font-size: 1rem;"><input type="checkbox"> <span>📁 Documents</span></label>
+              </div>
+              <!-- Hidden old input to preserve app.js logic -->
+              <input id="driveFolderInput" type="text" style="display: none;" value="Expense Screenshots">
+            </section>
+            
+            <section class="tool-panel glass-card">
+              <div class="panel-heading"><h2>Auto-Scan Settings</h2></div>
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--glass-border); padding-bottom: 20px; margin-bottom: 20px;">
+                <div>
+                  <h3 style="margin-bottom: 4px;">Auto-scan new files</h3>
+                  <p style="color: var(--text-muted); font-size: 0.85rem;">Detect receipts as they appear</p>
+                </div>
+                <div style="width: 44px; height: 24px; background: var(--brand); border-radius: 12px; position: relative;"><div style="width: 20px; height: 20px; background: #fff; border-radius: 50%; position: absolute; right: 2px; top: 2px;"></div></div>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <h3 style="margin-bottom: 4px;">Scan frequency</h3>
+                  <p style="color: var(--text-muted); font-size: 0.85rem;">How often to check Drive</p>
+                </div>
+                <select style="width: 140px; min-height: 38px;"><option>Every hour</option></select>
+              </div>
+            </section>
+            
+            <section class="tool-panel glass-card">
+              <div class="panel-heading" style="margin-bottom: 0;">
+                <div>
+                  <h2 style="margin-bottom: 4px;">Manual Scan</h2>
+                  <p style="color: var(--text-muted); font-size: 0.85rem;"><span id="queueCount">0 files found</span> in last scan</p>
+                </div>
+                <button class="primary-button" id="scanDriveBtn" type="button" style="border-radius: 20px; height: 38px; min-height: 38px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><polyline points="21 3 21 8 16 8"></polyline></svg> Scan Now</button>
+              </div>
+              <div class="queue-list" id="queueList" style="margin-top: 24px;"></div>
             </section>
           </div>
         </section>
 
         <section class="view" id="reviewView">
-          <section class="tool-panel">
-            <div class="panel-heading"><h2>Review inbox</h2><span class="panel-value" id="reviewCount">0 items</span></div>
+          <div class="dash-header" style="margin-top: 24px;">
+            <div>
+              <h1 class="login-heading" style="font-size: 2.2rem; margin-bottom: 4px;">AI Review</h1>
+              <p style="color: var(--text-muted); font-size: 0.95rem;">Approve or edit AI parsed entries</p>
+            </div>
+          </div>
+          <section class="tool-panel glass-card">
+            <div class="panel-heading"><h2>Review Inbox</h2><span class="panel-value mono" id="reviewCount">0 items</span></div>
             <div class="review-list" id="reviewList"></div>
           </section>
         </section>
 
         <section class="view" id="reportsView">
+          <div class="dash-header" style="margin-top: 24px;">
+            <div>
+              <h1 class="login-heading" style="font-size: 2.2rem; margin-bottom: 4px;">Reports & Analytics</h1>
+              <p style="color: var(--text-muted); font-size: 0.95rem;">Monthly performance, category mix, and spending insights</p>
+            </div>
+          </div>
           <div class="reports-grid">
-            <section class="tool-panel"><div class="panel-heading"><h2>Selected month</h2><input id="reportMonth" type="month" aria-label="Report month"></div><div class="report-list" id="monthReport"></div></section>
-            <section class="tool-panel"><div class="panel-heading"><h2>Category breakdown</h2><span class="panel-value" id="reportTotal">INR 0</span></div><div class="breakdown-list" id="breakdownList"></div></section>
-            <section class="tool-panel wide-panel"><div class="panel-heading"><h2>Source and merchant insights</h2><span class="panel-value" id="insightTotal">0 records</span></div><div class="insight-grid" id="insightGrid"></div></section>
+            <section class="tool-panel glass-card report-summary-card">
+              <div class="panel-heading report-heading">
+                <h2>Selected Month</h2>
+                <input id="reportMonth" type="month" aria-label="Report month">
+              </div>
+              <div class="report-list" id="monthReport"></div>
+            </section>
+            <section class="tool-panel glass-card report-breakdown-card">
+              <div class="panel-heading">
+                <h2>Category Breakdown</h2>
+                <span class="panel-value mono" id="reportTotal">INR 0</span>
+              </div>
+              <div class="breakdown-list" id="breakdownList"></div>
+            </section>
+            <section class="tool-panel wide-panel glass-card">
+              <div class="panel-heading"><h2>Source & Merchant Insights</h2><span class="panel-value mono" id="insightTotal">0 records</span></div>
+              <div class="insight-grid" id="insightGrid"></div>
+            </section>
           </div>
         </section>
 
         <section class="view" id="assistantView">
-          <section class="tool-panel assistant-panel">
-            <div class="panel-heading"><h2>Finance assistant</h2><span class="panel-value">Uses saved transactions</span></div>
+          <section class="tool-panel assistant-panel glass-card">
+            <div class="panel-heading"><h2>Finance Assistant</h2><span class="panel-value">AI uses your data context</span></div>
             <div class="chat-log" id="chatLog"></div>
             <form id="assistantForm" class="assistant-form">
-              <input id="assistantInput" type="text" placeholder="Ask about this month, top merchants, budget, savings">
+              <input id="assistantInput" type="text" placeholder="Ask about this month, top merchants, budget, savings...">
               <button class="primary-button" type="submit">Ask</button>
             </form>
           </section>
         </section>
 
         <section class="view" id="settingsView">
-          <section class="tool-panel settings-panel">
+          <section class="tool-panel settings-panel glass-card">
             <div class="panel-heading"><h2>Settings</h2><span class="panel-value" id="profileStatus">Local profile</span></div>
             <div class="settings-grid">
               <label><span>Name</span><input id="profileNameInput" type="text" placeholder="Your name"></label>
               <label><span>Email</span><input id="profileEmailInput" type="email" placeholder="you@example.com"></label>
-              <label><span>Monthly budget</span><input id="budgetInput" type="number" min="0" step="100"></label>
+              <label><span>Monthly Budget</span><input id="budgetInput" type="number" min="0" step="100" class="mono"></label>
               <label><span>Currency</span><select id="currencyInput"><option value="INR">INR</option><option value="USD">USD</option><option value="EUR">EUR</option><option value="GBP">GBP</option></select></label>
-              <label><span>AI backend URL</span><input id="backendUrlInput" type="url" placeholder="http://127.0.0.1:8787"></label>
-              <label><span>Confidence threshold</span><input id="confidenceInput" type="number" min="0" max="1" step="0.05"></label>
-              <label class="checkbox-row"><input id="serverSyncInput" type="checkbox" checked> <span>Sync wallet to local server (SQLite file on this PC)</span></label>
+              <label><span>AI Backend URL</span><input id="backendUrlInput" type="url" placeholder="http://127.0.0.1:8787"></label>
+              <label><span>Confidence Threshold</span><input id="confidenceInput" type="number" min="0" max="1" step="0.05" class="mono"></label>
+              <label class="checkbox-row"><input id="serverSyncInput" type="checkbox" checked> <span>Sync wallet to local server (SQLite encrypted)</span></label>
             </div>
             <div class="settings-actions">
-              <button class="secondary-button" type="button" id="googleLoginBtn">Connect Google</button>
+              <button class="secondary-button" type="button" id="googleLogoutBtn">Sign out of Google</button>
               <button class="secondary-button" type="button" id="checkBackendBtn">Check AI</button>
               <button class="primary-button" type="button" id="saveSettingsBtn">Save settings</button>
               <button class="secondary-button" type="button" id="loadSampleBtn">Load sample data</button>

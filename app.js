@@ -20,6 +20,7 @@ const state = {
     currency: "INR",
     profileName: "",
     profileEmail: "",
+    localAuthenticated: false,
     googleConnected: false,
     driveConnected: false,
     driveFolderName: "Expense Screenshots",
@@ -59,6 +60,8 @@ const els = {
   monthlyChart: $("monthlyChart"),
   categoryLegend: $("categoryLegend"),
   categoryChartTotal: $("categoryChartTotal"),
+  dashboardRecentList: $("dashboardRecentList"),
+  dashboardInsightsList: $("dashboardInsightsList"),
   transactionTable: $("transactionTable"),
   transactionCount: $("transactionCount"),
   searchInput: $("searchInput"),
@@ -100,13 +103,23 @@ const els = {
   confidenceInput: $("confidenceInput"),
   serverSyncInput: $("serverSyncInput"),
   googleLoginBtn: $("googleLoginBtn"),
+  googleLogoutBtn: $("googleLogoutBtn"),
   saveSettingsBtn: $("saveSettingsBtn"),
   loadSampleBtn: $("loadSampleBtn"),
   clearDataBtn: $("clearDataBtn"),
   exportCsvBtn: $("exportCsvBtn"),
   exportJsonBtn: $("exportJsonBtn"),
   printBtn: $("printBtn"),
-  toast: $("toast")
+  toast: $("toast"),
+  localAuthForm: $("localAuthForm"),
+  authTitle: $("authTitle"),
+  authSubtitle: $("authSubtitle"),
+  authSubmitBtn: $("authSubmitBtn"),
+  switchAuthMode: $("switchAuthMode"),
+  sidebarProfileName: $("sidebarProfileName"),
+  sidebarProfileEmail: $("sidebarProfileEmail"),
+  sidebarCollapseBtn: $("sidebarCollapseBtn"),
+  sidebarLogoutBtn: $("sidebarLogoutBtn")
 };
 
 function todayIso() {
@@ -388,16 +401,105 @@ function renderSummary() {
   els.reviewMetric.textContent = String(pending);
   els.driveMetric.textContent = state.settings.driveConnected ? "On" : "Off";
   els.savingsRate.textContent = `${Math.max(savingsPercent, 0)}% saved`;
+
+  const dashName = document.getElementById("dashProfileName");
+  if (dashName) dashName.textContent = state.settings.profileName || "User";
+  
+  if (els.sidebarProfileName) els.sidebarProfileName.textContent = state.settings.profileName || "User";
+  if (els.sidebarProfileEmail) els.sidebarProfileEmail.textContent = state.settings.profileEmail || "user@example.com";
+
+  const dashTotalExpense = document.getElementById("dashTotalExpense");
+  if (dashTotalExpense) dashTotalExpense.textContent = money(currentTotals.expense);
+
+  const dashDailyAvg = document.getElementById("dashDailyAvg");
+  if (dashDailyAvg) {
+    const dayOfMonth = Math.max(1, new Date().getDate());
+    dashDailyAvg.textContent = money(currentTotals.expense / dayOfMonth);
+  }
+
+  const dashTopCat = document.getElementById("dashTopCat");
+  const dashTopCatDesc = document.getElementById("dashTopCatDesc");
+  if (dashTopCat && dashTopCatDesc) {
+    const cats = Object.entries(expenseByCategory(monthTransactions())).sort((a, b) => b[1] - a[1]);
+    if (cats.length > 0) {
+      dashTopCat.textContent = cats[0][0];
+      const percent = Math.round((cats[0][1] / (currentTotals.expense || 1)) * 100);
+      dashTopCatDesc.textContent = `${money(cats[0][1])} - ${percent}% of total`;
+    } else {
+      dashTopCat.textContent = "None";
+      dashTopCatDesc.textContent = "$0 - 0% of total";
+    }
+  }
+
+  const dashAiScore = document.getElementById("dashAiScore");
+  if (dashAiScore) {
+    const score = Math.max(0, 100 - budgetPercent);
+    dashAiScore.textContent = `${score}/100`;
+  }
+  
+  const sidebarReviewBadge = document.getElementById("sidebarReviewBadge");
+  if (sidebarReviewBadge) {
+    sidebarReviewBadge.textContent = String(pending);
+    sidebarReviewBadge.style.display = pending > 0 ? "inline-block" : "none";
+  }
+  renderDashboardExtras(currentTotals, pending);
+}
+
+function renderDashboardExtras(currentTotals, pending) {
+  if (els.dashboardRecentList) {
+    const recent = state.transactions
+      .filter((tx) => tx.status !== "rejected")
+      .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 5);
+    els.dashboardRecentList.innerHTML = recent.length ? "" : `<div class="empty-state compact-empty">No transactions yet.</div>`;
+    recent.forEach((tx) => {
+      const row = document.createElement("div");
+      row.className = "dashboard-activity-item";
+      row.innerHTML = `
+        <span class="activity-icon ${tx.type}">${tx.type === "income" ? "+" : "-"}</span>
+        <span class="activity-main"><strong>${escapeHtml(tx.merchant)}</strong><small>${formatDate(tx.date)} · ${label(tx.sourceType)}</small></span>
+        <span class="activity-amount ${tx.type}-text">${tx.type === "income" ? "+" : "-"}${money(tx.amount)}</span>`;
+      els.dashboardRecentList.append(row);
+    });
+  }
+  if (els.dashboardInsightsList) {
+    const cats = Object.entries(expenseByCategory(monthTransactions())).sort((a, b) => b[1] - a[1]);
+    const top = cats[0];
+    const budgetUsed = state.settings.budget > 0 ? Math.round((currentTotals.expense / state.settings.budget) * 100) : 0;
+    const insights = [
+      top ? ["trend", `${top[0]} leads spending`, `${money(top[1])} this month across ${top[0].toLowerCase()}.`] : ["trend", "No category signal yet", "Add expenses to unlock category trends."],
+      pending ? ["review", `${pending} item${pending === 1 ? "" : "s"} need review`, "Approve AI-detected transactions to keep reports accurate."] : ["review", "Review queue is clear", "All parsed transactions are currently handled."],
+      state.settings.budget > 0 ? ["budget", `Budget ${budgetUsed <= 100 ? "on watch" : "exceeded"}`, `${budgetUsed}% of ${money(state.settings.budget)} used this month.`] : ["budget", "Set a monthly budget", "Add a budget in Settings for better forecasting."],
+    ];
+    els.dashboardInsightsList.innerHTML = "";
+    insights.forEach(([tone, title, text]) => {
+      const item = document.createElement("div");
+      item.className = `dashboard-insight ${tone}`;
+      item.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(text)}</span>`;
+      els.dashboardInsightsList.append(item);
+    });
+  }
 }
 
 function drawEmpty(ctx, width, height, text) {
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#f7f9fb";
+  ctx.fillStyle = "#090917";
   ctx.fillRect(0, 0, width, height);
-  ctx.fillStyle = "#667085";
-  ctx.font = "700 18px Segoe UI, Arial";
+  ctx.fillStyle = "#8d9aaa";
+  ctx.font = "700 16px Inter, Segoe UI, Arial";
   ctx.textAlign = "center";
   ctx.fillText(text, width / 2, height / 2);
+}
+
+function roundedRect(ctx, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + width, y, x + width, y + height, r);
+  ctx.arcTo(x + width, y + height, x, y + height, r);
+  ctx.arcTo(x, y + height, x, y, r);
+  ctx.arcTo(x, y, x + width, y, r);
+  ctx.closePath();
 }
 
 function drawCategoryChart() {
@@ -409,35 +511,40 @@ function drawCategoryChart() {
   els.categoryLegend.innerHTML = "";
   if (!total) return drawEmpty(ctx, canvas.width, canvas.height, "No expenses this month");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  const centerX = 180;
+  const bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  bg.addColorStop(0, "#0d0d1c");
+  bg.addColorStop(1, "#070713");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const centerX = canvas.width / 2;
   const centerY = canvas.height / 2;
-  const radius = 105;
+  const radius = Math.min(canvas.width, canvas.height) * 0.28;
   let startAngle = -Math.PI / 2;
   data.forEach(([category, value], index) => {
     const slice = (value / total) * Math.PI * 2;
     ctx.beginPath();
-    ctx.moveTo(centerX, centerY);
     ctx.arc(centerX, centerY, radius, startAngle, startAngle + slice);
-    ctx.closePath();
-    ctx.fillStyle = chartColors[index % chartColors.length];
-    ctx.fill();
+    ctx.strokeStyle = chartColors[index % chartColors.length];
+    ctx.lineWidth = 22;
+    ctx.lineCap = "round";
+    ctx.stroke();
     startAngle += slice;
     const percent = Math.round((value / total) * 100);
     const item = document.createElement("div");
     item.className = "legend-item";
-    item.innerHTML = `<span class="legend-left"><span class="swatch" style="background:${chartColors[index % chartColors.length]}"></span><strong>${escapeHtml(category)}</strong></span><span>${money(value)} | ${percent}%</span>`;
+    item.innerHTML = `<span class="legend-left"><span class="swatch" style="background:${chartColors[index % chartColors.length]}"></span><strong>${escapeHtml(category)}</strong></span><span>${money(value)} <small>${percent}%</small></span>`;
     els.categoryLegend.append(item);
   });
   ctx.beginPath();
-  ctx.arc(centerX, centerY, 58, 0, Math.PI * 2);
-  ctx.fillStyle = "#ffffff";
+  ctx.arc(centerX, centerY, Math.max(radius - 22, 30), 0, Math.PI * 2);
+  ctx.fillStyle = "#090917";
   ctx.fill();
-  ctx.fillStyle = "#172026";
-  ctx.font = "800 16px Segoe UI, Arial";
+  ctx.fillStyle = "#f0f0fa";
+  ctx.font = "800 14px Inter, Segoe UI, Arial";
   ctx.textAlign = "center";
   ctx.fillText("Expense", centerX, centerY - 6);
-  ctx.fillStyle = "#667085";
-  ctx.font = "700 13px Segoe UI, Arial";
+  ctx.fillStyle = "#8d9aaa";
+  ctx.font = "700 12px JetBrains Mono, Consolas, monospace";
   ctx.fillText(money(total), centerX, centerY + 17);
 }
 
@@ -451,42 +558,96 @@ function drawMonthlyChart() {
   const canvas = els.monthlyChart;
   const ctx = canvas.getContext("2d");
   const data = monthlyGroups();
-  const maxValue = Math.max(...data.map((item) => Math.max(item.income, item.expense)), 1);
+  const budget = Number(state.settings.budget) || 0;
+  const maxValue = Math.max(...data.map((item) => Math.max(item.income, item.expense)), budget, 1);
   const width = canvas.width;
   const height = canvas.height;
-  const padding = { top: 28, right: 22, bottom: 48, left: 64 };
+  const padding = { top: 34, right: 34, bottom: 46, left: 68 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
-  const groupWidth = chartWidth / data.length;
-  const barWidth = Math.min(34, groupWidth / 4);
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#ffffff";
+  const bg = ctx.createLinearGradient(0, 0, 0, height);
+  bg.addColorStop(0, "#0d0d1c");
+  bg.addColorStop(1, "#070713");
+  ctx.fillStyle = bg;
   ctx.fillRect(0, 0, width, height);
-  ctx.strokeStyle = "#d9e1e8";
-  ctx.font = "700 12px Segoe UI, Arial";
-  ctx.fillStyle = "#667085";
+  ctx.font = "700 12px JetBrains Mono, Consolas, monospace";
+  ctx.lineWidth = 1;
   ctx.textAlign = "right";
   for (let i = 0; i <= 4; i += 1) {
     const y = padding.top + (chartHeight / 4) * i;
     const value = maxValue - (maxValue / 4) * i;
+    ctx.strokeStyle = "rgba(255,255,255,0.07)";
+    ctx.setLineDash([5, 7]);
     ctx.beginPath();
     ctx.moveTo(padding.left, y);
     ctx.lineTo(width - padding.right, y);
     ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#8d9aaa";
     ctx.fillText(shortMoney(value), padding.left - 10, y + 4);
   }
-  data.forEach((item, index) => {
-    const x = padding.left + index * groupWidth + groupWidth / 2;
-    const incomeHeight = (item.income / maxValue) * chartHeight;
-    const expenseHeight = (item.expense / maxValue) * chartHeight;
-    ctx.fillStyle = "#1f8f55";
-    ctx.fillRect(x - barWidth - 3, padding.top + chartHeight - incomeHeight, barWidth, incomeHeight);
-    ctx.fillStyle = "#c94f4f";
-    ctx.fillRect(x + 3, padding.top + chartHeight - expenseHeight, barWidth, expenseHeight);
-    ctx.fillStyle = "#667085";
-    ctx.textAlign = "center";
-    ctx.fillText(labelMonth(item.month), x, height - 22);
+  const xFor = (index) => padding.left + (chartWidth / Math.max(data.length - 1, 1)) * index;
+  const yFor = (value) => padding.top + chartHeight - (value / maxValue) * chartHeight;
+  if (budget > 0) {
+    const y = yFor(budget);
+    ctx.strokeStyle = "rgba(196,181,253,0.72)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 8]);
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(width - padding.right, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  const expensePoints = data.map((item, index) => [xFor(index), yFor(item.expense)]);
+  const incomePoints = data.map((item, index) => [xFor(index), yFor(item.income)]);
+  const area = ctx.createLinearGradient(0, padding.top, 0, height - padding.bottom);
+  area.addColorStop(0, "rgba(94,234,212,0.28)");
+  area.addColorStop(1, "rgba(94,234,212,0)");
+  ctx.beginPath();
+  expensePoints.forEach(([x, y], index) => {
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
   });
+  ctx.lineTo(width - padding.right, height - padding.bottom);
+  ctx.lineTo(padding.left, height - padding.bottom);
+  ctx.closePath();
+  ctx.fillStyle = area;
+  ctx.fill();
+  [
+    { points: incomePoints, color: "rgba(52,211,153,0.86)", width: 2 },
+    { points: expensePoints, color: "#5eead4", width: 3 },
+  ].forEach(({ points, color, width: lineWidth }) => {
+    ctx.beginPath();
+    points.forEach(([x, y], index) => {
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+  });
+  expensePoints.forEach(([x, y]) => {
+    ctx.fillStyle = "#070713";
+    ctx.strokeStyle = "#5eead4";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  });
+  data.forEach((item, index) => {
+    ctx.fillStyle = "#8d9aaa";
+    ctx.textAlign = "center";
+    ctx.fillText(labelMonth(item.month), xFor(index), height - 20);
+  });
+  ctx.textAlign = "right";
+  ctx.font = "700 12px Inter, Segoe UI, Arial";
+  ctx.fillStyle = "#5eead4";
+  ctx.fillText("Expense", width - padding.right - 74, padding.top - 12);
+  ctx.fillStyle = "rgba(196,181,253,0.85)";
+  ctx.fillText("Budget", width - padding.right, padding.top - 12);
 }
 
 function renderTransactions() {
@@ -514,14 +675,29 @@ function renderTransactions() {
 }
 
 function renderQueue() {
-  els.driveStatus.textContent = state.settings.driveConnected ? `Connected: ${state.settings.driveFolderName}` : "Not connected";
-  els.driveStatus.classList.toggle("connected", state.settings.driveConnected);
-  els.queueCount.textContent = `${state.queue.length} ${state.queue.length === 1 ? "file" : "files"}`;
-  els.queueList.innerHTML = state.queue.length ? "" : `<div class="empty-state compact-empty">No queued files.</div>`;
+  const text = document.getElementById("driveStatusText");
+  if (state.settings.driveConnected) {
+    els.connectDriveBtn.style.display = "none";
+    els.disconnectDriveBtn.style.display = "inline-flex";
+    els.scanDriveBtn.disabled = false;
+    els.driveStatus.style.display = "inline-flex";
+    if (text) text.textContent = `Connected · ${state.settings.profileEmail || 'Active'}`;
+  } else {
+    els.connectDriveBtn.style.display = "inline-flex";
+    els.disconnectDriveBtn.style.display = "none";
+    els.scanDriveBtn.disabled = true;
+    els.driveStatus.style.display = "none";
+    if (text) text.textContent = "Not connected";
+  }
+
+  els.queueCount.textContent = `${state.queue.length} ${state.queue.length === 1 ? "file" : "files"} found`;
+  els.queueList.innerHTML = state.queue.length ? "" : `<div class="empty-state compact-empty" style="background: transparent; border: 1px dashed var(--glass-border);">No queued files.</div>`;
   state.queue.slice().reverse().forEach((item) => {
     const node = document.createElement("div");
     node.className = "queue-item";
-    node.innerHTML = `<strong>${escapeHtml(item.name)}</strong><span>${label(item.status)} | ${label(item.sourceType)}</span>`;
+    node.style = "display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--glass-border);";
+    node.innerHTML = `<div style="display: flex; gap: 12px; align-items: center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--text-muted);"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg> <strong style="font-weight: 500;">${escapeHtml(item.name)}</strong></div>
+    <div style="font-size: 0.85rem; color: var(--text-muted); display: flex; gap: 12px; align-items: center;">${new Date(item.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} <span class="status-pill ${item.status}">${label(item.status)}</span></div>`;
     els.queueList.append(node);
   });
 }
@@ -581,7 +757,7 @@ function renderReports() {
     const percent = totals.expense ? Math.round((value / totals.expense) * 100) : 0;
     const item = document.createElement("div");
     item.className = "breakdown-item";
-    item.innerHTML = `<span class="breakdown-left"><span class="swatch" style="background:${chartColors[index % chartColors.length]}"></span><strong>${escapeHtml(category)}</strong></span><span class="progress-track"><span class="progress-bar" style="width:${percent}%"></span></span><span>${money(value)} | ${percent}%</span>`;
+    item.innerHTML = `<span class="breakdown-left"><span class="swatch" style="background:${chartColors[index % chartColors.length]}"></span><strong>${escapeHtml(category)}</strong></span><span class="progress-track"><span class="progress-bar" style="width:${percent}%"></span></span><span class="breakdown-value"><strong>${money(value)}</strong><small>${percent}%</small></span>`;
     els.breakdownList.append(item);
   });
   renderInsights(transactions);
@@ -618,7 +794,8 @@ function renderChat() {
 function renderSettings() {
   const profile = state.settings.googleConnected ? "Google connected" : "Local profile";
   els.profileStatus.textContent = state.settings.aiBackendConnected ? `${profile} | AI ready` : profile;
-  els.googleLoginBtn.textContent = state.settings.googleConnected ? "Sign out of Google" : "Sign in with Google";
+  if (els.googleLoginBtn) els.googleLoginBtn.textContent = state.settings.googleConnected ? "Sign out of Google" : "Sign in with Google";
+  if (els.googleLogoutBtn) els.googleLogoutBtn.textContent = "Sign out of Google";
 }
 
 function renderAll() {
@@ -631,6 +808,49 @@ function renderAll() {
   renderSettings();
   drawCategoryChart();
   drawMonthlyChart();
+  updateAppVisibility();
+}
+
+function updateAppVisibility() {
+  const appContent = document.getElementById("appContent");
+  const loginScreen = document.getElementById("loginScreen");
+  if (!appContent || !loginScreen) return;
+  
+  if (state.settings.googleConnected || state.settings.localAuthenticated) {
+    appContent.classList.remove("hidden");
+    loginScreen.classList.add("hidden");
+  } else {
+    appContent.classList.add("hidden");
+    loginScreen.classList.remove("hidden");
+  }
+}
+
+let isSignUp = false;
+function toggleAuthMode(e) {
+  e.preventDefault();
+  isSignUp = !isSignUp;
+  if (isSignUp) {
+    els.authTitle.textContent = "Create an account";
+    els.authSubtitle.textContent = "Sign up to start tracking your expenses";
+    els.authSubmitBtn.textContent = "Sign up";
+    els.switchAuthMode.textContent = "Sign in";
+    els.switchAuthMode.parentElement.firstChild.textContent = "Already have an account? ";
+  } else {
+    els.authTitle.textContent = "Welcome back";
+    els.authSubtitle.textContent = "Sign in to your financial intelligence dashboard";
+    els.authSubmitBtn.textContent = "Sign in";
+    els.switchAuthMode.textContent = "Sign up free";
+    els.switchAuthMode.parentElement.firstChild.textContent = "Don't have an account? ";
+  }
+}
+
+function handleLocalAuth(e) {
+  e.preventDefault();
+  state.settings.localAuthenticated = true;
+  persist();
+  updateAppVisibility();
+  toast(isSignUp ? "Account created successfully." : "Signed in successfully.");
+  switchView("overview");
 }
 
 function upsert(tx) {
@@ -1042,10 +1262,36 @@ async function handleQuickEntry(event) {
   toast(tx.status === "saved" ? "Text entry saved." : "Text entry sent to review.");
 }
 
-async function handleUpload(event) {
-  event.preventDefault();
-  const file = els.uploadInput.files[0];
-  if (!file) return toast("Choose a file first.");
+async function handleUpload(e) {
+  e.preventDefault();
+  const files = els.uploadInput.files;
+  if (!files || files.length === 0) return;
+  const textHint = els.uploadText.value.trim();
+  
+  els.uploadForm.querySelector('button[type="submit"]').disabled = true;
+  let added = 0;
+  
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    try {
+      const parsed = await processUploadFile(file, textHint);
+      if (parsed) {
+        state.transactions.unshift(parsed);
+        added++;
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }
+  
+  persist();
+  resetForm();
+  renderAll();
+  switchView("review");
+  toast(`${added} item(s) pushed to AI Review.`);
+}
+
+async function processUploadFile(file, textHint) {
   if (file.size > MAX_UPLOAD_BYTES) {
     return toast("File is too large (max 12 MB). Try a smaller photo or export a JPEG.");
   }
@@ -1056,18 +1302,14 @@ async function handleUpload(event) {
     submitBtn.textContent = "Uploading...";
   }
   try {
-    const rawText = els.uploadText.value.trim();
     const queueItem = { id: id("file"), name: file.name, sourceType: file.type === "application/pdf" ? "drive_receipt" : "receipt_upload", status: "processing", createdAt: new Date().toISOString() };
     state.queue.push(queueItem);
-    const tx = await parseSmartImage(file, rawText);
+    const tx = await parseSmartImage(file, textHint);
     tx.sourceFileId = queueItem.id;
-    tx.confidence = Math.min(tx.confidence, rawText ? 0.9 : 0.78);
+    tx.confidence = Math.min(tx.confidence, textHint ? 0.9 : 0.78);
     tx.status = "needs_review";
     createReview(tx, queueItem);
-    els.uploadForm.reset();
-    persist();
-    renderAll();
-    toast("Upload added to review.");
+    return tx;
   } finally {
     if (submitBtn) {
       submitBtn.disabled = false;
@@ -1103,6 +1345,7 @@ async function disconnectDrive() {
 
 async function scanDrive() {
   const folderName = els.driveFolderInput.value.trim() || state.settings.driveFolderName;
+  
   if (state.settings.driveConnected) {
     els.scanDriveBtn.disabled = true;
     const originalText = els.scanDriveBtn.textContent;
@@ -1321,10 +1564,10 @@ function wireEvents() {
     if (event.data.status === "success") {
       if (event.data.type === "autospend-drive-auth") {
         toast("Google Drive authorization completed.");
-        refreshDriveStatus();
+        refreshDriveStatus().then(renderAll);
       } else {
         toast("Google sign-in completed.");
-        refreshAuthStatus();
+        refreshAuthStatus().then(renderAll).then(() => switchView("overview"));
       }
     } else {
       toast(event.data.message || "Authorization failed.");
@@ -1339,12 +1582,40 @@ function wireEvents() {
   els.assistantForm.addEventListener("submit", askAssistant);
   els.saveSettingsBtn.addEventListener("click", saveSettings);
   els.checkBackendBtn.addEventListener("click", checkBackend);
-  els.googleLoginBtn.addEventListener("click", toggleGoogle);
+  if (els.googleLoginBtn) els.googleLoginBtn.addEventListener("click", toggleGoogle);
+  if (els.googleLogoutBtn) els.googleLogoutBtn.addEventListener("click", () => {
+    if (state.settings.googleConnected) {
+      toggleGoogle();
+    } else {
+      state.settings.localAuthenticated = false;
+      persist();
+      renderAll();
+      toast("Signed out successfully.");
+    }
+  });
+  if (els.localAuthForm) els.localAuthForm.addEventListener("submit", handleLocalAuth);
+  if (els.switchAuthMode) els.switchAuthMode.addEventListener("click", toggleAuthMode);
   els.loadSampleBtn.addEventListener("click", loadSampleData);
   els.clearDataBtn.addEventListener("click", clearData);
   els.exportCsvBtn.addEventListener("click", exportCsv);
   els.exportJsonBtn.addEventListener("click", exportJson);
-  els.printBtn.addEventListener("click", () => window.print());
+  if (els.sidebarCollapseBtn) {
+    els.sidebarCollapseBtn.addEventListener("click", () => {
+      document.body.classList.toggle("sidebar-collapsed");
+    });
+  }
+  if (els.sidebarLogoutBtn) {
+    els.sidebarLogoutBtn.addEventListener("click", () => {
+      if (state.settings.googleConnected) {
+        toggleGoogle();
+      } else {
+        state.settings.localAuthenticated = false;
+        persist();
+        renderAll();
+        toast("Signed out successfully.");
+      }
+    });
+  }
   els.reportMonth.addEventListener("change", renderReports);
   [els.searchInput, els.typeFilter, els.categoryFilter, els.monthFilter, els.sourceFilter, els.statusFilter].forEach((input) => {
     input.addEventListener("input", renderTransactions);
@@ -1389,6 +1660,31 @@ function escapeHtml(value) {
   return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 }
 
+function handleLocalAuth(e) {
+  e.preventDefault();
+  const email = document.getElementById("authEmail").value;
+  const password = document.getElementById("authPassword").value;
+  if (!email || !password) return toast("Please enter both email and password.");
+  
+  state.settings.localAuthenticated = true;
+  state.settings.profileEmail = email;
+  state.settings.profileName = email.split("@")[0];
+  persist();
+  renderAll();
+  switchView("overview");
+  toast("Signed in successfully.");
+}
+
+function toggleAuthMode(e) {
+  e.preventDefault();
+  const isSignUp = els.authSubmitBtn.textContent === "Sign in";
+  els.authTitle.textContent = isSignUp ? "Create an account" : "Welcome back";
+  els.authSubtitle.textContent = isSignUp ? "Sign up to start your financial intelligence dashboard" : "Sign in to your financial intelligence dashboard";
+  els.authSubmitBtn.textContent = isSignUp ? "Sign up" : "Sign in";
+  els.switchAuthMode.textContent = isSignUp ? "Sign in instead" : "Sign up free";
+  els.switchAuthMode.parentElement.firstChild.textContent = isSignUp ? "Already have an account? " : "Don't have an account? ";
+}
+
 async function initializeApp() {
   loadState();
   setupControls();
@@ -1396,6 +1692,7 @@ async function initializeApp() {
   await Promise.all([pullServerData(), refreshDriveStatus(), refreshAuthStatus()]);
   setupControls();
   renderAll();
+  switchView("overview");
 }
 
 initializeApp();
